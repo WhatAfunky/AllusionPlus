@@ -10,7 +10,7 @@ import {
 } from 'mobx';
 import Path from 'path';
 
-import { FILE_TAGS_SORTING_TYPE, FileDTO, FileStats, IMG_EXTENSIONS_TYPE } from '../../api/file';
+import { FILE_TAGS_SORTING_TYPE, FileDTO, FileStats } from '../../api/file';
 import { ID } from '../../api/id';
 import ImageLoader from '../image/ImageLoader';
 import FileStore from '../stores/FileStore';
@@ -27,7 +27,7 @@ interface IMetaData {
   /** Duplicate data; also exists as part of the absolutePath. Used for DB queries */
   name: string;
   /** in lowercase, without the dot */
-  extension: IMG_EXTENSIONS_TYPE;
+  extension: string;
   /** Size in bytes */
   size: number;
   width: number;
@@ -67,7 +67,7 @@ export class ClientFile {
   readonly dateModifiedOS: Date;
   readonly dateLastIndexed: Date;
   readonly name: string;
-  readonly extension: IMG_EXTENSIONS_TYPE;
+  readonly extension: string;
   /** Same as "name", but without extension */
   readonly filename: string;
 
@@ -296,7 +296,7 @@ export async function getMetaData(stats: FileStats, imageLoader: ImageLoader): P
 
   return {
     name: Path.basename(path),
-    extension: Path.extname(path).slice(1).toLowerCase() as IMG_EXTENSIONS_TYPE,
+    extension: Path.extname(path).slice(1).toLowerCase(),
     size: stats.size,
     width: dimensions.width,
     height: dimensions.height,

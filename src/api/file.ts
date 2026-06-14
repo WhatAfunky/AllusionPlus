@@ -28,21 +28,20 @@ export type FileDTO = {
   dateAdded: Date;
   /** When the file was modified in Allusion, not related to OS modified date */
   dateModified: Date;
-  /** Original OS dateModified for checking when searching for overwritten files
-   * If the system's modified date is not the same, it means the file has been overwritten or another file with the same name
-   * overwritten in place of the previous one, and the thumbnail and metadata needs to be updated.
-   */
+  /** Original OS dateModified for checking when searching for overwritten files */
   dateModifiedOS: Date;
-  /**
-   * When the file was last indexed in Allusion: concerning the metadata and thumbnail.
-   * If the system's modified date of the file exceeds this date, those properties shoudld be re-initialized
-   **/
+  /** When the file was last indexed in Allusion */
   dateLastIndexed: Date;
 
   /** Duplicate data; also exists as part of the absolutePath. Used for DB queries */
   name: string;
-  /** in lowercase, without the dot */
-  extension: IMG_EXTENSIONS_TYPE;
+  /**
+   * File extension in lowercase, without the dot.
+   * Can be any string — Allusion indexes all file types, and the extension
+   * determines how the file is displayed (known formats render normally,
+   * unknown formats show a placeholder thumbnail).
+   */
+  extension: string;
   /** Size in bytes */
   size: number;
   width: number;
@@ -51,6 +50,11 @@ export type FileDTO = {
   dateCreated: Date;
 };
 
+/**
+ * The registry of file extensions that Allusion knows how to render.
+ * This is NOT used as a gate for indexing — all files are indexed regardless.
+ * It is used to determine the display/thumbnail strategy for a file.
+ */
 export const IMG_EXTENSIONS = [
   'gif',
   'png',
@@ -71,15 +75,11 @@ export const IMG_EXTENSIONS = [
   // 'xcf', // Gimp
   'exr', // OpenEXR
   // 'raw', there are many RAW file extensions :( https://fileinfo.com/filetypes/camera_raw
-  // 'avif',
   // 'heic', // not supported by Sharp out of the box https://github.com/lovell/sharp/issues/2871
   'mp4',
   'webm',
   'ogg',
-
-  // --- Placeholder types: indexed and taggable, shown with a static thumbnail ---
-
-  // Audio
+  // Audio — placeholder thumbnail, no playback
   'mp3',
   'wav',
   'flac',
@@ -87,11 +87,24 @@ export const IMG_EXTENSIONS = [
   'm4a',
   'opus',
   'wma',
-
-  // 3D / Project files
+  // 3D / Project files — placeholder thumbnail
   'blend',
 ] as const;
+
+/** Union type of all extensions Allusion has explicit rendering support for. */
 export type IMG_EXTENSIONS_TYPE = (typeof IMG_EXTENSIONS)[number];
+
+/**
+ * A user-managed file extension entry.
+ * The user can add any extension to this list and toggle whether it is indexed.
+ * Extensions NOT in this list are indexed by default (everything-in approach).
+ */
+export type ManagedExtension = {
+  /** Extension in lowercase without the dot, e.g. "exr", "blend" */
+  extension: string;
+  /** When true, files with this extension are skipped during indexing */
+  blocked: boolean;
+};
 
 export const FILE_TAGS_SORTING = ['insertion', 'hierarchy'] as const;
 export type FILE_TAGS_SORTING_TYPE = (typeof FILE_TAGS_SORTING)[number];

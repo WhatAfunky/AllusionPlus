@@ -20,10 +20,16 @@ type FormatHandlerType =
   | 'exrLoader'
   | 'psdLoader'
   | 'extractEmbeddedThumbnailOnly'
-  | 'placeholder' // Non-visual files: indexed & taggable, shown with a generated static thumbnail
+  | 'placeholder' // Any file without a specific handler: static colored thumbnail, no preview
   | 'none';
 
-const FormatHandlers: Record<IMG_EXTENSIONS_TYPE, FormatHandlerType> = {
+/**
+ * Maps known extensions to their display/thumbnail handler.
+ * Extensions NOT in this map fall through to 'placeholder' automatically —
+ * so adding new extensions to IMG_EXTENSIONS only requires adding them here
+ * if they need special rendering. Unknown file types get a placeholder by default.
+ */
+const FormatHandlers: Partial<Record<string, FormatHandlerType>> = {
   gif: 'web',
   png: 'web',
   apng: 'web',
@@ -41,32 +47,31 @@ const FormatHandlers: Record<IMG_EXTENSIONS_TYPE, FormatHandlerType> = {
   kra: 'extractEmbeddedThumbnailOnly',
   // xcf: 'extractEmbeddedThumbnailOnly',
   exr: 'exrLoader',
-  // avif: 'sharp',
   mp4: 'web',
   webm: 'web',
   ogg: 'web',
-  // Audio
-  mp3: 'placeholder',
-  wav: 'placeholder',
-  flac: 'placeholder',
-  aac: 'placeholder',
-  m4a: 'placeholder',
-  opus: 'placeholder',
-  wma: 'placeholder',
-  // 3D / Project files
-  blend: 'placeholder',
+  // All other extensions get 'placeholder' via the getHandler() fallback below
 };
 
 /**
- * Default dimensions assigned to placeholder files (audio, blend, etc.).
- * These have no visual dimensions, but the masonry layout needs a non-zero
- * value to render the cell. A square is the most neutral choice.
+ * Returns the display handler for a given extension.
+ * Falls back to 'placeholder' for any extension not explicitly mapped.
+ */
+function getHandler(extension: string): FormatHandlerType {
+  return FormatHandlers[extension] ?? 'placeholder';
+}
+
+/**
+ * Default dimensions assigned to placeholder files.
+ * Files with no visual dimensions (audio, 3D, unknown types) need a non-zero
+ * value so the masonry layout renders a proper cell.
  */
 const PLACEHOLDER_DIMENSIONS = { width: 512, height: 512 };
 
 /**
  * Visual style per file category, used when generating placeholder thumbnails.
- * bg: canvas background fill, accent: border + label color.
+ * bg: canvas background, accent: border + label color.
+ * Falls back to DEFAULT_PLACEHOLDER_STYLE for any unlisted extension.
  */
 const PLACEHOLDER_STYLE: Record<string, { bg: string; accent: string; label: string }> = {
   mp3:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
@@ -103,48 +108,34 @@ class ImageLoader {
   }
 
   needsThumbnail(file: FileDTO) {
+    const handler = getHandler(file.extension);
     return (
-      FormatHandlers[file.extension] !== 'web' ||
+      handler !== 'web' ||
       file.width > thumbnailMaxSize ||
       file.height > thumbnailMaxSize ||
-      //always make thumbnail for gifs and videos to use when not playing
       file.extension === 'gif' ||
       isFileExtensionVideo(file.extension)
     );
   }
 
-  /**
-   * Ensures a thumbnail exists, will return instantly if already exists.
-   * @param file The file to generate a thumbnail for
-   * @returns Whether a thumbnail had to be generated
-   * @throws When a thumbnail does not exist and cannot be generated
-   */
   async ensureThumbnail(file: ClientFile): Promise<boolean> {
     const { extension, absolutePath, thumbnailPath } = {
       extension: file.extension,
       absolutePath: file.absolutePath,
-      // remove ?v=1 that might have been added after the thumbnail was generated earlier
       thumbnailPath: file.thumbnailPath.split('?')[0],
     };
 
     if (await fse.pathExists(thumbnailPath)) {
-      // Files like PSDs have a tendency to change: Check if thumbnail needs an update
       const fileStats = await fse.stat(absolutePath);
       const thumbStats = await fse.stat(thumbnailPath);
-      // if file mod date is before thumbnail creation date, keep using the same thumbnail
-      // sometimes files like psd have wrong modified date, like a mtime in the future, which causes an infinite loop of re-render thumbnails
       if (fileStats.mtime < thumbStats.ctime || fileStats.mtime.getTime() > Date.now()) {
         return false;
       }
     }
 
-    const handlerType = FormatHandlers[extension];
+    const handlerType = getHandler(extension);
     switch (handlerType) {
       case 'web':
-        // If the third argument of `generateThumbnailUsingWorker`, "timeoutReject", is set to true,
-        // it will cause a reject/throw and return an error inside the imageSource promise when the timeout finishes.
-        // If it is set to false, it will resolve the await, causing a "retry-like" behavior by triggering a rerender
-        // and calling `updateThumbnailPath` after each timeout until the thumbnail is generated.
         await generateThumbnailUsingWorker(file, thumbnailPath, false);
         updateThumbnailPath(file, thumbnailPath);
         break;
@@ -158,15 +149,12 @@ class ImageLoader {
         break;
       case 'extractEmbeddedThumbnailOnly':
         let success = false;
-        // Custom logic for specific file formats
         if (extension === 'kra') {
           success = await this.extractKritaThumbnail(absolutePath, thumbnailPath);
         } else {
-          // Fallback to extracting thumbnail using exiftool (works for PSD and some other formats)
           success = await this.exifIO.extractThumbnail(absolutePath, thumbnailPath);
         }
         if (!success) {
-          // There might not be an embedded thumbnail
           throw new Error('Could not generate or extract thumbnail');
         } else {
           updateThumbnailPath(file, thumbnailPath);
@@ -181,76 +169,73 @@ class ImageLoader {
         updateThumbnailPath(file, thumbnailPath);
         break;
       case 'none':
-        // No thumbnail for this format
         file.setThumbnailPath(file.absolutePath);
         break;
       default:
-        console.warn('Unsupported extension', file.absolutePath, file.extension);
-        throw new Error('Unsupported extension ' + file.absolutePath);
+        console.warn('Unhandled extension', file.absolutePath, extension);
+        // Treat as placeholder rather than throwing — any unknown extension gets a colored tile
+        await this.generatePlaceholderThumbnail(extension, thumbnailPath);
+        updateThumbnailPath(file, thumbnailPath);
     }
     return true;
   }
 
   async getImageSrc(file: ClientFile): Promise<string | undefined> {
-    const handlerType = FormatHandlers[file.extension];
+    const handlerType = getHandler(file.extension);
     switch (handlerType) {
       case 'web':
         return file.absolutePath;
       case 'tifLoader': {
         const src =
           this.srcBufferCache.get(file) ?? (await getBlob(this.tifLoader, file.absolutePath));
-        // Store in cache for a while, so it loads quicker when going back and forth
         this.updateCache(file, src);
         return src;
       }
       case 'exrLoader': {
         const src =
           this.srcBufferCache.get(file) ?? (await getBlob(this.exrLoader, file.absolutePath));
-        // Store in cache for a while, so it loads quicker when going back and forth
         this.updateCache(file, src);
         return src;
       }
-      case 'psdLoader':
+      case 'psdLoader': {
         const src =
           this.srcBufferCache.get(file) ?? (await getBlob(this.psdLoader, file.absolutePath));
         this.updateCache(file, src);
         return src;
-      // TODO: krita has full image also embedded (mergedimage.png)
+      }
       case 'extractEmbeddedThumbnailOnly':
         if (file.extension === 'kra') {
           const src =
             this.srcBufferCache.get(file) ??
             (await this.extractKritaMergedImageAsBlobURL(file.absolutePath));
-          // Store in cache for a while, so it loads quicker when going back and forth
           src && this.updateCache(file, src);
           return src;
         }
+        return undefined;
       case 'placeholder':
-        // The placeholder thumbnail IS the full representation — reuse it for slide/preview mode too
+        // The placeholder thumbnail is the full representation — reuse for slide/preview mode
         return file.thumbnailPath.split('?')[0];
       case 'none':
         return undefined;
       default:
-        console.warn('Unsupported extension', file.absolutePath, file.extension);
-        return undefined;
+        // Unknown extension: same as placeholder
+        return file.thumbnailPath.split('?')[0];
     }
   }
 
-  /** Returns 0 for width and height if they can't be determined */
+  /** Returns PLACEHOLDER_DIMENSIONS for non-visual files, real dimensions otherwise. */
   async getImageResolution(absolutePath: string): Promise<{ width: number; height: number }> {
-    // Placeholder files (audio, blend, etc.) have no meaningful visual dimensions.
-    // Return a fixed square so the masonry layout renders a proper cell instead of a 0×0 ghost.
-    const ext = path.extname(absolutePath).slice(1).toLowerCase() as IMG_EXTENSIONS_TYPE;
-    if (ext in FormatHandlers && FormatHandlers[ext] === 'placeholder') {
+    const ext = path.extname(absolutePath).slice(1).toLowerCase();
+    const handler = getHandler(ext);
+
+    // Non-visual files have no meaningful dimensions — return a fixed square
+    // so the masonry layout renders a proper cell instead of a 0×0 ghost.
+    if (handler === 'placeholder') {
       return PLACEHOLDER_DIMENSIONS;
     }
 
-    // ExifTool should be able to read the resolution from any image file
     const dimensions = await this.exifIO.getDimensions(absolutePath);
 
-    // User report: Resolution can't be found for PSD files.
-    // Can't reproduce myself, but putting a check in place anyway. Maybe due to old PSD format?
-    // Read the actual file using the PSD loader and get the resolution from there.
     if (dimensions.width === 0 || dimensions.height === 0) {
       if (absolutePath.toLowerCase().endsWith('psd')) {
         try {
@@ -268,9 +253,9 @@ class ImageLoader {
   }
 
   /**
-   * Generates a static colored placeholder thumbnail for non-visual file types.
-   * The thumbnail is written to disk just like any other thumbnail so the rest
-   * of the caching/display pipeline requires zero changes.
+   * Generates a static colored placeholder thumbnail for any non-visual file type.
+   * The result is a real .webp file written to disk — the rest of the pipeline
+   * (caching, display, gallery) requires zero changes.
    */
   private async generatePlaceholderThumbnail(
     extension: string,
@@ -300,10 +285,9 @@ class ImageLoader {
     ctx.font = 'bold 72px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`.${extension.toUpperCase()}`, SIZE / 2, SIZE / 2);
+    ctx.fillText(extension ? `.${extension.toUpperCase()}` : 'FILE', SIZE / 2, SIZE / 2);
 
-    // Category label below (e.g. "AUDIO")
-    ctx.fillStyle = style.accent;
+    // Category sublabel (e.g. "AUDIO")
     ctx.globalAlpha = 0.5;
     ctx.font = '32px sans-serif';
     ctx.fillText(style.label, SIZE / 2, SIZE / 2 + 70);
@@ -359,7 +343,6 @@ class ImageLoader {
       const xml = xmlBuffer.toString('utf-8');
       const widthStr = extractAttribute(xml, 'IMAGE', 'width');
       const heightStr = extractAttribute(xml, 'IMAGE', 'height');
-
       return {
         width: widthStr ? parseInt(widthStr, 10) : 0,
         height: heightStr ? parseInt(heightStr, 10) : 0,
@@ -388,7 +371,6 @@ class ImageLoader {
 
 export default ImageLoader;
 
-// Update the thumbnail path to re-render the image where ever it is used in React
 const updateThumbnailPath = action((file: ClientFile, thumbnailPath: string) => {
   file.setThumbnailPath(thumbnailPath);
 });

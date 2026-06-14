@@ -34,7 +34,6 @@ export function encodeFilePath(filePath: string): string {
     filename = filename.slice(0, paramsIndex);
   }
   // edge case for #
-  // TODO: there must be others edge cases like this. Why is this so hard? Is there no built-in function for this?
   basepath = basepath.replace(/#/g, '%23');
   return `file://${basepath}${encodeURIComponent(filename)}${params}`;
 }
@@ -44,14 +43,24 @@ export async function isDirEmpty(dir: string) {
   return dirContents.length === 0 || (dirContents.length === 1 && dirContents[0] === '.DS_Store');
 }
 
+// ---------------------------------------------------------------------------
+// Video extensions
+// ---------------------------------------------------------------------------
+
 const VideoExtensions = ['webm', 'mp4', 'ogg'] as const satisfies readonly IMG_EXTENSIONS_TYPE[];
 export type VideoExtensionsType = (typeof VideoExtensions)[number];
 
-export function isFileExtensionVideo(
-  fileExtension: IMG_EXTENSIONS_TYPE,
-): fileExtension is VideoExtensionsType {
-  return (VideoExtensions as readonly IMG_EXTENSIONS_TYPE[]).includes(fileExtension);
+/**
+ * Returns true if the extension is a known video format.
+ * Accepts any string so it can be called with FileDTO.extension (which is now `string`).
+ */
+export function isFileExtensionVideo(fileExtension: string): boolean {
+  return (VideoExtensions as readonly string[]).includes(fileExtension);
 }
+
+// ---------------------------------------------------------------------------
+// Native image-compatible extensions (can be used directly as <img src>)
+// ---------------------------------------------------------------------------
 
 const NativeImageCompatibleExtensions = [
   'png',
@@ -61,13 +70,17 @@ const NativeImageCompatibleExtensions = [
 ] as const satisfies readonly IMG_EXTENSIONS_TYPE[];
 export type NativeImageCompatibleExtensionsType = (typeof NativeImageCompatibleExtensions)[number];
 
-export function isNativeImageCompatible(
-  fileExtension: IMG_EXTENSIONS_TYPE,
-): fileExtension is NativeImageCompatibleExtensionsType {
-  return (NativeImageCompatibleExtensions as readonly IMG_EXTENSIONS_TYPE[]).includes(
-    fileExtension,
-  );
+/**
+ * Returns true if the extension can be used directly as an <img> src without conversion.
+ * Accepts any string so it can be called with FileDTO.extension (which is now `string`).
+ */
+export function isNativeImageCompatible(fileExtension: string): boolean {
+  return (NativeImageCompatibleExtensions as readonly string[]).includes(fileExtension);
 }
+
+// ---------------------------------------------------------------------------
+// Internal utilities
+// ---------------------------------------------------------------------------
 
 function hashString(s: string) {
   let hash = 0;
@@ -86,10 +99,8 @@ function hashString(s: string) {
 }
 
 /**
- * Gets the path to a resource set up in `"extraResources`" in the package.json.
+ * Gets the path to a resource set up in `"extraResources"` in the package.json.
  * See https://www.electron.build/configuration/contents#extraresources
- * Could look into process.resourcesPath, but that doesn't seem to work in dev mode
- * @param resourcePath The from from the resources directory, e.g. `"themes/myTheme.css"`
  */
 export function getExtraResourcePath(resourcePath: string): string {
   const relativeResourcesPath = (IS_DEV ? '../' : '../../') + 'resources';

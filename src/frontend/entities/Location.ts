@@ -11,7 +11,7 @@ import {
 import SysPath from 'path';
 
 import { retainArray } from 'common/core';
-import { FileStats, IMG_EXTENSIONS_TYPE } from '../../api/file';
+import { FileStats } from '../../api/file';
 import { generateId, ID } from '../../api/id';
 import { LocationDTO, SubLocationDTO } from '../../api/location';
 import { RendererMessenger } from '../../ipc/renderer';
@@ -125,21 +125,20 @@ export class ClientLocation {
   worker?: Remote<FolderWatcherWorker>;
   _worker?: Worker;
 
-  // Whether the initial scan has been completed, and no watching setup is in process
   @observable isSettingWatcher;
-  // whether initialization has started or has been completed
   @observable isInitialized = false;
-  // whether sub-locations are being refreshed
   @observable isRefreshing = false;
-  // true when the path no longer exists (broken link)
   @observable isBroken = false;
-  //
   @observable isWatchingFiles: boolean;
 
   index: number;
 
-  /** The file extensions for the files to be watched */
-  extensions: IMG_EXTENSIONS_TYPE[];
+  /**
+   * Extensions that the user has blocked from indexing.
+   * Files with these extensions are skipped during scan and live watching.
+   * Everything else is indexed regardless of extension.
+   */
+  blockedExtensions: Set<string>;
 
   /** Absolute paths loaded from .allusionignore — files and folders to skip during indexing */
   ignoredPaths: string[] = [];
@@ -147,7 +146,6 @@ export class ClientLocation {
   readonly subLocations: IObservableArray<ClientSubLocation>;
   readonly tags: ObservableSet<ClientTag>;
   locationTag: ClientTag | undefined;
-  /** A cached list of all sublocations that are excluded (isExcluded === true) */
   protected readonly excludedPaths: ClientSubLocation[] = [];
 
   readonly id: ID;
@@ -161,7 +159,7 @@ export class ClientLocation {
     dateAdded: Date,
     subLocations: SubLocationDTO[],
     tags: ID[],
-    extensions: IMG_EXTENSIONS_TYPE[],
+    blockedExtensions: string[],
     index: number,
     isWatchingFiles: boolean,
   ) {
@@ -169,7 +167,7 @@ export class ClientLocation {
     this.id = id;
     this.path = path;
     this.dateAdded = dateAdded;
-    this.extensions = extensions;
+    this.blockedExtensions = new Set(blockedExtensions);
     this.index = index;
     this.isWatchingFiles = isWatchingFiles;
     this.isSettingWatcher = isWatchingFiles;
@@ -209,7 +207,7 @@ export class ClientLocation {
       await this.refreshSublocations();
     }
 
-    // Load .allusionignore for this location before scanning or watching anything
+    // Load .allusionignore for this location before scanning or watching
     this.ignoredPaths = await readIgnoreList(this.path);
     if (this.ignoredPaths.length > 0) {
       console.debug(`[${this.name}] Loaded ${this.ignoredPaths.length} ignore rule(s) from .allusionignore`);
@@ -231,7 +229,7 @@ export class ClientLocation {
       this.excludedPaths.splice(0, this.excludedPaths.length);
       this.excludedPaths.push(...getExcludedSubLocsRecursively(this.subLocations));
     });
-    // update tagstore location tags
+
     this.store.refreshLocationTags([this]);
     if (await fse.pathExists(this.path)) {
       this.setBroken(false);
@@ -240,14 +238,17 @@ export class ClientLocation {
     }
   }
 
-  /**
-   * Reloads the .allusionignore file for this location.
-   * Called after writing a new entry to the ignore list so that
-   * the in-memory list is immediately up to date.
-   */
   async reloadIgnoreList(): Promise<void> {
     this.ignoredPaths = await readIgnoreList(this.path);
     console.debug(`[${this.name}] Reloaded ignore list: ${this.ignoredPaths.length} rule(s)`);
+  }
+
+  /**
+   * Updates the blocked extension set when the user changes their preferences.
+   * Called by LocationStore after saving managed extensions.
+   */
+  updateBlockedExtensions(blockedExtensions: string[]): void {
+    this.blockedExtensions = new Set(blockedExtensions);
   }
 
   @action setBroken(state: boolean): void {
@@ -283,29 +284,17 @@ export class ClientLocation {
 
   async updateSublocationExclusion(subLocation: ClientSubLocation): Promise<void> {
     if (subLocation.isExcluded) {
-      // If excluded:
-      // - first update the cache, so new added images won't be detected
       if (!this.excludedPaths.includes(subLocation)) {
         this.excludedPaths.push(subLocation);
       }
-
-      // What to do with current files?
-      // Just hide them, in case it's included again?
-      // Maybe move to separate collection? that won't work cleanly after tag removal
-      // Looking at it realistically, this will be used for directories that contain animation frames, junk, timelapses, etc.
-      // in which case it should be fine to just get rid of it all
       if (this.isInitialized) {
         await this.store.removeSublocationFiles(subLocation);
       }
     } else {
-      // If included, re-scan for files in that path
-      // - first, update cache
       const index = this.excludedPaths.findIndex((l) => l === subLocation);
       if (index !== -1) {
         this.excludedPaths.splice(index, 1);
       }
-
-      // - not trivial to do a re-scan. Could also just re-start, won't be used that often anyways I think
       if (this.isInitialized) {
         AppToaster.show({
           message: 'Restart Allusion to re-detect any images',
@@ -317,9 +306,6 @@ export class ClientLocation {
         });
       }
     }
-
-    // Save location to DB
-    // Exclusion status is the only thing that can change for locations, so no need for saving through observing
     this.save();
   }
 
@@ -372,13 +358,11 @@ export class ClientLocation {
     this.index = index;
   }
 
-  /** Cleanup resources */
   async drop(): Promise<void> {
     return this.worker?.close();
   }
 
   @action async refreshSublocations(rootDirectoryItem?: IDirectoryTreeItem): Promise<void> {
-    // Trigger loading icon
     this.isRefreshing = true;
 
     let rootItem;
@@ -393,8 +377,6 @@ export class ClientLocation {
       rootItem = rootDirectoryItem;
     }
 
-    // Replaces the subLocations on every subLocation recursively
-    // Doesn't deal specifically with renamed directories, only added/deleted ones
     const updateSubLocations = action(
       (loc: ClientLocation | ClientSubLocation, dir: IDirectoryTreeItem) => {
         const newSublocations: ClientSubLocation[] = [];
@@ -418,13 +400,11 @@ export class ClientLocation {
           }
         }
         loc.subLocations.replace(newSublocations.sort(sort));
-
         this.isRefreshing = false;
       },
     );
 
     updateSubLocations(this, rootItem);
-    // TODO: optimization: only update if sublocations changed
     this.store.save(this.serialize());
   }
 
@@ -438,40 +418,34 @@ export class ClientLocation {
       );
       return [undefined, undefined];
     }
-    // Copied logic from src\frontend\workers\folderWatcher.worker.ts\folderWatcher.watch.ignored
-    const extensions = this.extensions;
-    // Replace backslash with forward slash, recommended by chokidar
-    // See docs for the .watch method: https://github.com/paulmillr/chokidar#api
+
     const directory = this.path.replace(/\\/g, '/');
-    const shouldIgnore = (path: string, dirent?: fse.Dirent) => {
-      const basename = SysPath.basename(path);
-      // Ignore .dot files and folders.
-      if (basename.startsWith('.')) {
-        return true;
-      }
-      // Check .allusionignore — skip the path entirely during traversal for efficiency
-      if (isPathIgnored(path, this.ignoredPaths)) {
-        return true;
-      }
-      // If the path doesn't have an extension (likely a directory), don't ignore it.
-      // In the unlikely situation it is a file, we'll filter it out later in the .on('add', ...)
-      const ext = SysPath.extname(path).toLowerCase().split('.')[1];
-      if (!ext) {
-        return false;
-      }
-      // If the path (file or directory) ends with an image extension, don't ignore it.
-      if (extensions.includes(ext as IMG_EXTENSIONS_TYPE)) {
-        return false;
-      }
-      // Otherwise, we need to know whether it is a file or a directory before making a decision.
-      // If we don't return anything, this callback will be called a second time, with the stats
-      // variable as second argument
-      if (dirent) {
-        // Ignore if
-        // * dot directory like `/home/.hidden-directory/` but not `/home/directory.with.dots/` and
-        // * not a directory, and not an image file either.
-        return !dirent.isDirectory() || SysPath.basename(path).startsWith('.');
-      }
+
+    /**
+     * Determines whether a file or directory should be skipped.
+     * Under the new "index everything" model:
+     * - dot-prefixed names are always skipped (hidden / system files)
+     * - .allusionignore entries are skipped
+     * - files with a user-blocked extension are skipped
+     * - everything else is included, regardless of extension
+     */
+    const shouldIgnore = (filePath: string, dirent?: fse.Dirent): boolean => {
+      const basename = SysPath.basename(filePath);
+
+      // Skip hidden/system files and folders
+      if (basename.startsWith('.')) return true;
+
+      // Skip .allusionignore entries
+      if (isPathIgnored(filePath, this.ignoredPaths)) return true;
+
+      // Skip files with extensions the user has explicitly blocked
+      const ext = SysPath.extname(filePath).toLowerCase().slice(1);
+      if (ext && this.blockedExtensions.has(ext)) return true;
+
+      // For directories: always recurse (unless caught above)
+      if (dirent?.isDirectory()) return false;
+
+      // For files: include everything (any extension, or no extension)
       return false;
     };
 
@@ -498,14 +472,11 @@ export class ClientLocation {
               ],
             ];
           } else {
-            const stats = dirent.isDirectory() ? undefined : await fse.stat(absolutePath);
-            if (stats === undefined) {
-              return [[], []];
-            }
+            const stats = await fse.stat(absolutePath);
             return [
               [
                 {
-                  absolutePath: absolutePath,
+                  absolutePath,
                   dateCreated: stats.birthtime,
                   dateModified: stats.mtime,
                   size: Number(stats.size),
@@ -520,16 +491,10 @@ export class ClientLocation {
 
       const flatFiles: FileStats[] = [];
       const flatDirs: IDirectoryTreeItem[] = [];
-      for (let i = 0; i < filesDirectoriesPairs.length; i++) {
-        const [files, dirs] = filesDirectoriesPairs[i];
-        for (let j = 0; j < files.length; j++) {
-          flatFiles.push(files[j]);
-        }
-        for (let j = 0; j < dirs.length; j++) {
-          flatDirs.push(dirs[j]);
-        }
+      for (const [files, dirs] of filesDirectoriesPairs) {
+        flatFiles.push(...files);
+        flatDirs.push(...dirs);
       }
-
       return [flatFiles, flatDirs];
     };
 
@@ -572,26 +537,16 @@ export class ClientLocation {
     }) => {
       if (data.type === 'add') {
         const { absolutePath } = data.value;
-        // Filter out files located in any excluded subLocations
-        if (this.excludedPaths.some((subLoc) => data.value.absolutePath.startsWith(subLoc.path))) {
+        if (this.excludedPaths.some((subLoc) => absolutePath.startsWith(subLoc.path))) {
           console.debug('File added to excluded sublocation', absolutePath);
         } else if (isPathIgnored(absolutePath, this.ignoredPaths)) {
-          // Filter out files matching .allusionignore
-          // (parcel watcher's ignore array also blocks most of these at the OS level,
-          // but we double-check here to handle any edge cases)
           console.debug('File ignored by .allusionignore', absolutePath);
         } else {
           console.log(`File ${absolutePath} has been added after initialization`);
           this.store.addFile(data.value, this);
         }
       } else if (data.type === 'update') {
-        // when update set a short timeout because in the case the update was caused by writting tags with exiftool
-        // the update event gets executed before exiftool can finish
-        // so chokidar and fse dont use the presserved modified date exiftool set
-        // why wait?: because comparing with the preserved modified date prevents the thumbnails from regenerating,
-        // saving a lot of memory and processing when exporting tags to files.
         setTimeout(async () => {
-          // get updated stats, because the Filestats generated by the event have the not-presserved modified date
           const updatesStats = await fse.stat(data.value.absolutePath);
           data.value.dateModified = updatesStats.mtime;
           this.store.updateFile(data.value);
@@ -630,7 +585,7 @@ export class ClientLocation {
     this.worker = await new WorkerFactory();
     this._worker?.terminate();
     this._worker = worker;
-    // Make a list of all files in this directory, which will be returned when all subdirs have been traversed
+
     await fse.ensureDir(this.store.watcherSnapshotDirectory);
     const snapshotFilePath = SysPath.join(
       this.store.watcherSnapshotDirectory,
@@ -638,7 +593,7 @@ export class ClientLocation {
     );
     await this.worker.watch(
       directory,
-      this.extensions,
+      Array.from(this.blockedExtensions),
       snapshotFilePath,
       this.store.PARCEL_WATCHER_BACKEND,
       this.ignoredPaths,
@@ -648,21 +603,18 @@ export class ClientLocation {
     return true;
   }
 
-  // close and save snapshots of the watcher worker
   @action async close(): Promise<void> {
     await this.worker?.cancel();
     await this.worker?.close();
   }
 }
+
 interface IDirectoryTreeItem {
   name: string;
   fullPath: string;
   children: IDirectoryTreeItem[];
 }
 
-/**
- * Recursive function that returns the dir list for a given path
- */
 async function getDirectoryTree(path: string): Promise<IDirectoryTreeItem[]> {
   try {
     const NULL = { name: '', fullPath: '', children: [] };

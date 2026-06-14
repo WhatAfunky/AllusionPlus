@@ -16,7 +16,7 @@
 import { ColumnType } from 'kysely';
 import { ID } from '../api/id';
 import { CriteriaValueType, OperatorType } from 'src/api/search-criteria';
-import { FILE_TAGS_SORTING_TYPE, FileDTO, IMG_EXTENSIONS_TYPE } from 'src/api/file';
+import { FILE_TAGS_SORTING_TYPE, FileDTO } from 'src/api/file';
 import { ExtraPropertyType } from 'src/api/extraProperty';
 import { SearchConjunction } from 'src/api/data-storage-search';
 
@@ -115,7 +115,12 @@ export type Files = {
   dateModifiedOs: DateAsNumber;
   dateLastIndexed: DateAsNumber;
   name: string;
-  extension: IMG_EXTENSIONS_TYPE;
+  /**
+   * File extension stored as a plain string.
+   * The SQLite column is TEXT so this change requires no migration —
+   * only the TypeScript type is being loosened from IMG_EXTENSIONS_TYPE to string.
+   */
+  extension: string;
   size: number;
   width: number;
   height: number;
@@ -171,9 +176,5 @@ export type SearchCriteria = {
   key: keyof FileDTO;
   valueType: CriteriaValueType;
   operator: OperatorType;
-  // Since we only need to filter by saved_search_id and not by individual value types,
-  // all values are stored as stringified JSON regardless of type.
-  // This simplifies the schema (single column) and querying. The type check is managed
-  // inside the app logic in the searchStore and thir related api types.
   jsonValue: string;
 };
