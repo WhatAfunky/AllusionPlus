@@ -16,6 +16,7 @@ import { ClientLocation, ClientSubLocation } from '../entities/Location';
 import { ClientStringSearchCriteria } from '../entities/SearchCriteria';
 import ImageLoader from '../image/ImageLoader';
 import RootStore from './RootStore';
+import { appendToIgnoreList } from './ignoreList';
 import { ClientTag } from '../entities/Tag';
 import { IS_MAC, IS_WIN } from 'common/process';
 import { BackendType } from '@parcel/watcher';
@@ -753,6 +754,74 @@ class LocationStore {
     );
     await this.backend.removeFiles(files.map((f) => f.id));
     this.rootStore.fileStore.refetch();
+  }
+
+  /**
+   * Excludes a file (or its parent folder) from Allusion without deleting it from disk.
+   *
+   * This does two things:
+   * 1. Appends the path to the location's .allusionignore file so it is
+   *    never re-indexed on future scans or folder watcher events.
+   * 2. Removes the file(s) from the Allusion database immediately.
+   *
+   * Called from the right-click context menu "Exclude from Allusion" submenu.
+   */
+  @action async excludeFromAllusion(file: ClientFile, excludeParentFolder: boolean): Promise<void> {
+    const location = this.locationList.find((l) => l.id === file.locationId);
+    if (!location) {
+      console.error('excludeFromAllusion: could not find location for file', file.absolutePath);
+      return;
+    }
+
+    const targetPath = excludeParentFolder
+      ? SysPath.dirname(file.absolutePath)
+      : file.absolutePath;
+
+    try {
+      // 1. Write the path to .allusionignore
+      await appendToIgnoreList(location.path, targetPath, excludeParentFolder);
+
+      if (excludeParentFolder) {
+        // 2a. Remove all files in the folder from the DB (without touching disk)
+        const crit = new ClientStringSearchCriteria(
+          undefined,
+          'absolutePath',
+          targetPath + SysPath.sep,
+          'startsWith',
+        ).toCondition();
+        const files = await this.backend.searchFiles(
+          { conjunction: 'and', children: [crit] },
+          'id',
+          OrderDirection.Asc,
+          false,
+        );
+        await this.backend.removeFiles(files.map((f) => f.id));
+        this.rootStore.fileStore.refetch();
+      } else {
+        // 2b. Remove just this one file from the DB (without touching disk)
+        const clientFile = this.rootStore.fileStore.get(file.id);
+        if (clientFile) {
+          await this.rootStore.fileStore.deleteFiles([clientFile]);
+        }
+      }
+
+      // 3. Reload the ignore list so the watcher and future scans respect the new entry immediately
+      await location.reloadIgnoreList();
+
+      AppToaster.show({
+        message: excludeParentFolder
+          ? `Folder "${SysPath.basename(targetPath)}" excluded from Allusion`
+          : `File "${file.name}" excluded from Allusion`,
+        timeout: 3000,
+      });
+    } catch (err) {
+      console.error('excludeFromAllusion: failed', err);
+      AppToaster.show({
+        message: 'Could not exclude from Allusion. Check the console for details.',
+        timeout: 5000,
+        type: 'warning',
+      });
+    }
   }
 
   /** Source is moved to where Target currently is */

@@ -17,6 +17,7 @@ import { LocationDTO, SubLocationDTO } from '../../api/location';
 import { RendererMessenger } from '../../ipc/renderer';
 import { AppToaster } from '../components/Toaster';
 import LocationStore from '../stores/LocationStore';
+import { readIgnoreList, isPathIgnored } from '../stores/ignoreList';
 import { FolderWatcherWorker } from '../workers/folderWatcher.worker';
 import { ClientTag } from './Tag';
 
@@ -140,6 +141,9 @@ export class ClientLocation {
   /** The file extensions for the files to be watched */
   extensions: IMG_EXTENSIONS_TYPE[];
 
+  /** Absolute paths loaded from .allusionignore — files and folders to skip during indexing */
+  ignoredPaths: string[] = [];
+
   readonly subLocations: IObservableArray<ClientSubLocation>;
   readonly tags: ObservableSet<ClientTag>;
   locationTag: ClientTag | undefined;
@@ -204,6 +208,13 @@ export class ClientLocation {
     if (this.isWatchingFiles) {
       await this.refreshSublocations();
     }
+
+    // Load .allusionignore for this location before scanning or watching anything
+    this.ignoredPaths = await readIgnoreList(this.path);
+    if (this.ignoredPaths.length > 0) {
+      console.debug(`[${this.name}] Loaded ${this.ignoredPaths.length} ignore rule(s) from .allusionignore`);
+    }
+
     runInAction(() => {
       this.isInitialized = true;
       function* getExcludedSubLocsRecursively(
@@ -227,6 +238,16 @@ export class ClientLocation {
     } else {
       this.setBroken(true);
     }
+  }
+
+  /**
+   * Reloads the .allusionignore file for this location.
+   * Called after writing a new entry to the ignore list so that
+   * the in-memory list is immediately up to date.
+   */
+  async reloadIgnoreList(): Promise<void> {
+    this.ignoredPaths = await readIgnoreList(this.path);
+    console.debug(`[${this.name}] Reloaded ignore list: ${this.ignoredPaths.length} rule(s)`);
   }
 
   @action setBroken(state: boolean): void {
@@ -428,6 +449,10 @@ export class ClientLocation {
       if (basename.startsWith('.')) {
         return true;
       }
+      // Check .allusionignore — skip the path entirely during traversal for efficiency
+      if (isPathIgnored(path, this.ignoredPaths)) {
+        return true;
+      }
       // If the path doesn't have an extension (likely a directory), don't ignore it.
       // In the unlikely situation it is a file, we'll filter it out later in the .on('add', ...)
       const ext = SysPath.extname(path).toLowerCase().split('.')[1];
@@ -517,7 +542,8 @@ export class ClientLocation {
 
     const filteredDiskFiles = diskFiles.filter(
       ({ absolutePath }) =>
-        !this.excludedPaths.some((subLoc) => absolutePath.startsWith(subLoc.path)),
+        !this.excludedPaths.some((subLoc) => absolutePath.startsWith(subLoc.path)) &&
+        !isPathIgnored(absolutePath, this.ignoredPaths),
     );
     return [filteredDiskFiles, rootItem];
   }
@@ -549,6 +575,11 @@ export class ClientLocation {
         // Filter out files located in any excluded subLocations
         if (this.excludedPaths.some((subLoc) => data.value.absolutePath.startsWith(subLoc.path))) {
           console.debug('File added to excluded sublocation', absolutePath);
+        } else if (isPathIgnored(absolutePath, this.ignoredPaths)) {
+          // Filter out files matching .allusionignore
+          // (parcel watcher's ignore array also blocks most of these at the OS level,
+          // but we double-check here to handle any edge cases)
+          console.debug('File ignored by .allusionignore', absolutePath);
         } else {
           console.log(`File ${absolutePath} has been added after initialization`);
           this.store.addFile(data.value, this);
@@ -610,6 +641,7 @@ export class ClientLocation {
       this.extensions,
       snapshotFilePath,
       this.store.PARCEL_WATCHER_BACKEND,
+      this.ignoredPaths,
     );
 
     this.setSettingWatcher(false);

@@ -59,7 +59,7 @@ const Tabs = () => {
       content: StartupBehavior,
     },
     {
-      label: 'Image Formats',
+      label: 'File Formats',
       content: ImageFormatPicker,
     },
     {

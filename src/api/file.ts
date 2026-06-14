@@ -73,10 +73,23 @@ export const IMG_EXTENSIONS = [
   // 'raw', there are many RAW file extensions :( https://fileinfo.com/filetypes/camera_raw
   // 'avif',
   // 'heic', // not supported by Sharp out of the box https://github.com/lovell/sharp/issues/2871
-  // TODO: 'blend', raw, etc.?
   'mp4',
   'webm',
   'ogg',
+
+  // --- Placeholder types: indexed and taggable, shown with a static thumbnail ---
+
+  // Audio
+  'mp3',
+  'wav',
+  'flac',
+  'aac',
+  'm4a',
+  'opus',
+  'wma',
+
+  // 3D / Project files
+  'blend',
 ] as const;
 export type IMG_EXTENSIONS_TYPE = (typeof IMG_EXTENSIONS)[number];
 

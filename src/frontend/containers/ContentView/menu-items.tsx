@@ -301,7 +301,16 @@ export const SlideFileViewerMenuItems = observer(({ file }: { file: ClientFile }
 });
 
 export const ExternalAppMenuItems = observer(({ file }: { file: ClientFile }) => {
-  const { uiStore } = useStore();
+  const { uiStore, locationStore } = useStore();
+
+  const handleExcludeFile = () => {
+    locationStore.excludeFromAllusion(file, false);
+  };
+
+  const handleExcludeParentFolder = () => {
+    locationStore.excludeFromAllusion(file, true);
+  };
+
   return (
     <>
       <MenuItem
@@ -323,6 +332,18 @@ export const ExternalAppMenuItems = observer(({ file }: { file: ClientFile }) =>
         icon={IconSet.FOLDER_CLOSE}
         disabled={file.isBroken}
       />
+      <MenuSubItem text="Exclude from Allusion" icon={IconSet.HIDDEN}>
+        <MenuItem
+          onClick={handleExcludeFile}
+          text="Exclude this file"
+          icon={IconSet.CLOSE}
+        />
+        <MenuItem
+          onClick={handleExcludeParentFolder}
+          text={`Exclude parent folder (${SysPath.basename(SysPath.dirname(file.absolutePath))})`}
+          icon={IconSet.FOLDER_CLOSE}
+        />
+      </MenuSubItem>
       <MenuItem
         onClick={uiStore.openMoveFilesToTrash}
         text={`Delete file${uiStore.fileSelection.size > 1 ? 's' : ''}`}

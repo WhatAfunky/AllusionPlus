@@ -1,9 +1,10 @@
 import fse from 'fs-extra';
 import { action } from 'mobx';
+import path from 'path';
 import StreamZip from 'node-stream-zip';
 
 import ExifIO from 'common/ExifIO';
-import { thumbnailMaxSize } from 'common/config';
+import { thumbnailFormat, thumbnailMaxSize } from 'common/config';
 import { FileDTO, IMG_EXTENSIONS_TYPE } from '../../api/file';
 import { ClientFile } from '../entities/File';
 import ExrLoader from './ExrLoader';
@@ -19,6 +20,7 @@ type FormatHandlerType =
   | 'exrLoader'
   | 'psdLoader'
   | 'extractEmbeddedThumbnailOnly'
+  | 'placeholder' // Non-visual files: indexed & taggable, shown with a generated static thumbnail
   | 'none';
 
 const FormatHandlers: Record<IMG_EXTENSIONS_TYPE, FormatHandlerType> = {
@@ -43,7 +45,41 @@ const FormatHandlers: Record<IMG_EXTENSIONS_TYPE, FormatHandlerType> = {
   mp4: 'web',
   webm: 'web',
   ogg: 'web',
+  // Audio
+  mp3: 'placeholder',
+  wav: 'placeholder',
+  flac: 'placeholder',
+  aac: 'placeholder',
+  m4a: 'placeholder',
+  opus: 'placeholder',
+  wma: 'placeholder',
+  // 3D / Project files
+  blend: 'placeholder',
 };
+
+/**
+ * Default dimensions assigned to placeholder files (audio, blend, etc.).
+ * These have no visual dimensions, but the masonry layout needs a non-zero
+ * value to render the cell. A square is the most neutral choice.
+ */
+const PLACEHOLDER_DIMENSIONS = { width: 512, height: 512 };
+
+/**
+ * Visual style per file category, used when generating placeholder thumbnails.
+ * bg: canvas background fill, accent: border + label color.
+ */
+const PLACEHOLDER_STYLE: Record<string, { bg: string; accent: string; label: string }> = {
+  mp3:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
+  wav:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
+  flac:  { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
+  aac:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
+  m4a:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
+  opus:  { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
+  wma:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
+  blend: { bg: '#1a1100', accent: '#e87d0d', label: 'BLEND' },
+};
+
+const DEFAULT_PLACEHOLDER_STYLE = { bg: '#1a1a1a', accent: '#555555', label: 'FILE' };
 
 type ObjectURL = string;
 
@@ -140,6 +176,10 @@ class ImageLoader {
         await generateThumbnail(this.psdLoader, absolutePath, thumbnailPath, thumbnailMaxSize);
         updateThumbnailPath(file, thumbnailPath);
         break;
+      case 'placeholder':
+        await this.generatePlaceholderThumbnail(extension, thumbnailPath);
+        updateThumbnailPath(file, thumbnailPath);
+        break;
       case 'none':
         // No thumbnail for this format
         file.setThumbnailPath(file.absolutePath);
@@ -185,6 +225,9 @@ class ImageLoader {
           src && this.updateCache(file, src);
           return src;
         }
+      case 'placeholder':
+        // The placeholder thumbnail IS the full representation — reuse it for slide/preview mode too
+        return file.thumbnailPath.split('?')[0];
       case 'none':
         return undefined;
       default:
@@ -195,6 +238,13 @@ class ImageLoader {
 
   /** Returns 0 for width and height if they can't be determined */
   async getImageResolution(absolutePath: string): Promise<{ width: number; height: number }> {
+    // Placeholder files (audio, blend, etc.) have no meaningful visual dimensions.
+    // Return a fixed square so the masonry layout renders a proper cell instead of a 0×0 ghost.
+    const ext = path.extname(absolutePath).slice(1).toLowerCase() as IMG_EXTENSIONS_TYPE;
+    if (ext in FormatHandlers && FormatHandlers[ext] === 'placeholder') {
+      return PLACEHOLDER_DIMENSIONS;
+    }
+
     // ExifTool should be able to read the resolution from any image file
     const dimensions = await this.exifIO.getDimensions(absolutePath);
 
@@ -215,6 +265,56 @@ class ImageLoader {
     }
 
     return dimensions;
+  }
+
+  /**
+   * Generates a static colored placeholder thumbnail for non-visual file types.
+   * The thumbnail is written to disk just like any other thumbnail so the rest
+   * of the caching/display pipeline requires zero changes.
+   */
+  private async generatePlaceholderThumbnail(
+    extension: string,
+    thumbnailFilePath: string,
+  ): Promise<void> {
+    const SIZE = 512;
+    const canvas = new OffscreenCanvas(SIZE, SIZE);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Could not get 2D canvas context for placeholder thumbnail');
+    }
+
+    const style = PLACEHOLDER_STYLE[extension] ?? DEFAULT_PLACEHOLDER_STYLE;
+
+    // Background
+    ctx.fillStyle = style.bg;
+    ctx.fillRect(0, 0, SIZE, SIZE);
+
+    // Border
+    const borderWidth = 6;
+    ctx.strokeStyle = style.accent;
+    ctx.lineWidth = borderWidth;
+    ctx.strokeRect(borderWidth / 2, borderWidth / 2, SIZE - borderWidth, SIZE - borderWidth);
+
+    // Extension label (e.g. ".MP3")
+    ctx.fillStyle = style.accent;
+    ctx.font = 'bold 72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`.${extension.toUpperCase()}`, SIZE / 2, SIZE / 2);
+
+    // Category label below (e.g. "AUDIO")
+    ctx.fillStyle = style.accent;
+    ctx.globalAlpha = 0.5;
+    ctx.font = '32px sans-serif';
+    ctx.fillText(style.label, SIZE / 2, SIZE / 2 + 70);
+    ctx.globalAlpha = 1;
+
+    const blob = await canvas.convertToBlob({
+      type: `image/${thumbnailFormat}`,
+      quality: 0.85,
+    });
+    const buffer = await blob.arrayBuffer();
+    await fse.outputFile(thumbnailFilePath, Buffer.from(buffer));
   }
 
   private async extractKritaThumbnail(absolutePath: string, outputPath: string) {

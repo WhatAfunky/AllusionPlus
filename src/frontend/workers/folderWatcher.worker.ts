@@ -35,12 +35,13 @@ export class FolderWatcherWorker {
     }
   }
 
-  /** Returns all supported image files in the given directly, and callbacks for new or removed files */
+  /** Returns all supported image files in the given directory, and callbacks for new or removed files */
   async watch(
     directory: string,
     extensions: IMG_EXTENSIONS_TYPE[],
     snapshotFilePath: string,
     backend: parcelWatcher.BackendType,
+    ignorePaths: string[] = [],
   ): Promise<void> {
     this.isCancelled = false;
     this.backend = backend;
@@ -48,7 +49,7 @@ export class FolderWatcherWorker {
     // Replace backslash with forward slash, recommended by chokidar
     // See docs for the .watch method: https://github.com/paulmillr/chokidar#api
     directory = directory.replace(/\\/g, '/');
-    snapshotFilePath = snapshotFilePath.replace(/\\/g, '/');
+    snapshotFilePath = snapshotFilePath.replace(/\\\\/g, '/');
     this.directory = directory;
     this.snapshotFilePath = snapshotFilePath;
 
@@ -136,7 +137,10 @@ export class FolderWatcherWorker {
             ctx.postMessage({ type: 'error', value: err.code });
         });
       },
-      { ignore: [], backend: backend },
+      // Pass ignorePaths to parcel watcher's native ignore list.
+      // This prevents events from firing at all for excluded paths,
+      // which is more efficient than filtering after the fact.
+      { ignore: ignorePaths, backend: backend },
     );
   }
 }
