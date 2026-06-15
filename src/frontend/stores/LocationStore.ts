@@ -69,6 +69,10 @@ class LocationStore {
   // Global option for now, needs restart. TODO: Maybe per location/sub-location?
   readonly managedExtensions = observable.array<ManagedExtension>([]);
   private filesToUpdate: Map<string, FileStats> = new Map();
+  /** Count of new files detected by the watcher awaiting a user-triggered refresh. */
+  private pendingNewFiles = 0;
+  /** Timestamp (ms) of the last focus-triggered location refresh, for throttling. */
+  private lastFocusRefresh = 0;
   debouncedUpdateFilesToUpdate: () => Promise<void>;
 
   constructor(backend: DataStorage, rootStore: RootStore) {
@@ -249,6 +253,64 @@ class LocationStore {
       this.rootStore.fileStore.refetch();
     }
     return foundNewFiles;
+  }
+
+  /** Derives the location(s) the current search query is scoped into (via absolutePath criteria). */
+  getActiveSearchedLocations(): ClientLocation[] {
+    const includePaths = (this.rootStore.uiStore.searchCriteriaList as any[])
+      .filter(
+        (c) => c.key === 'absolutePath' && c.operator === 'startsWith' && typeof c.value === 'string',
+      )
+      .map((c) => c.value as string);
+    if (includePaths.length === 0) {
+      return [];
+    }
+    return this.locationList.filter((loc) =>
+      includePaths.some((value) => value.startsWith(loc.path + SysPath.sep)),
+    );
+  }
+
+  /**
+   * Rescans the currently-viewed location(s) for new files when the window regains
+   * focus. No-op unless the setting is enabled, a location-scoped view is active,
+   * we are not already refreshing, and we haven't refreshed in the last 10 seconds.
+   */
+  @action.bound async refreshActiveLocationOnFocus(): Promise<void> {
+    const uiStore = this.rootStore.uiStore;
+    if (!uiStore.isRefreshActiveLocationOnFocusEnabled || uiStore.isRefreshing) {
+      return;
+    }
+    const now = Date.now();
+    if (now - this.lastFocusRefresh < 10_000) {
+      return;
+    }
+    const locations = this.getActiveSearchedLocations();
+    if (locations.length === 0) {
+      return;
+    }
+    this.lastFocusRefresh = now;
+    await this.updateLocations(locations);
+  }
+
+  /** Shows a sticky, click-to-refresh toast summarising new files found by the watcher. */
+  private notifyPendingNewFile(): void {
+    this.pendingNewFiles += 1;
+    const count = this.pendingNewFiles;
+    AppToaster.show(
+      {
+        message: `${count} new file${count > 1 ? 's' : ''} detected`,
+        timeout: 0,
+        clickAction: {
+          label: 'Refresh',
+          onClick: () => {
+            this.pendingNewFiles = 0;
+            this.rootStore.fileStore.refetch();
+            AppToaster.dismiss('new-files');
+          },
+        },
+      },
+      'new-files',
+    );
   }
 
   // Returns whether files have been added, changed or removed
@@ -707,6 +769,12 @@ class LocationStore {
       await this.backend.createFilesFromPath(fileStats.absolutePath, [file]);
       fileStore.setDirtyTotalFiles(true);
       fileStore.setDirtyUntaggedFiles(true);
+      if (this.rootStore.uiStore.isNotifyOnNewFilesEnabled) {
+        // The file is already in the DB; defer the (potentially expensive) gallery
+        // refetch and let the user refresh when they choose via the notification.
+        this.notifyPendingNewFile();
+        return;
+      }
       AppToaster.show({ message: 'New images have been detected.', timeout: 5000 }, 'new-images');
       // might be called a lot when moving many images into a folder, so debounce it
     }

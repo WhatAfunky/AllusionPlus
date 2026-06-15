@@ -189,6 +189,9 @@ type PersistentPreferenceFields =
   // startup options
   | 'isRefreshLocationsStartupEnabled'
   | 'isRememberSearchEnabled'
+  // file-change detection options
+  | 'isNotifyOnNewFilesEnabled'
+  | 'isRefreshActiveLocationOnFocusEnabled'
   // the following are only restored when isRememberSearchEnabled is enabled
   | 'isSlideMode'
   | 'firstItem'
@@ -235,6 +238,13 @@ class UiStore {
   @observable isRefreshLocationsStartupEnabled: boolean = false;
   /** Whether to restore the last search query on start-up */
   @observable isRememberSearchEnabled: boolean = true;
+  /**
+   * When watching detects new files, show a click-to-refresh notification
+   * instead of refreshing the gallery automatically (avoids surprise reflows).
+   */
+  @observable isNotifyOnNewFilesEnabled: boolean = false;
+  /** Rescan the currently-viewed location(s) for new files when the window regains focus. */
+  @observable isRefreshActiveLocationOnFocusEnabled: boolean = false;
   /** Cursor that represents the first item in the viewport. Also acts as the current item shown in slide mode */
   @observable firstItem: Cursor | undefined;
   @observable thumbnailSize: ThumbnailSize | number = 'medium';
@@ -571,6 +581,14 @@ class UiStore {
 
   @action.bound toggleRememberSearchQuery(): void {
     this.isRememberSearchEnabled = !this.isRememberSearchEnabled;
+  }
+
+  @action.bound toggleNotifyOnNewFiles(): void {
+    this.isNotifyOnNewFilesEnabled = !this.isNotifyOnNewFilesEnabled;
+  }
+
+  @action.bound toggleRefreshActiveLocationOnFocus(): void {
+    this.isRefreshActiveLocationOnFocusEnabled = !this.isRefreshActiveLocationOnFocusEnabled;
   }
 
   @action.bound openOutliner(): void {
@@ -1715,6 +1733,8 @@ class UiStore {
 
         this.isRefreshLocationsStartupEnabled = Boolean(prefs.isRefreshLocationsStartupEnabled ?? false); // eslint-disable-line prettier/prettier
         this.isRememberSearchEnabled = Boolean(prefs.isRememberSearchEnabled);
+        this.isNotifyOnNewFilesEnabled = Boolean(prefs.isNotifyOnNewFilesEnabled ?? false);
+        this.isRefreshActiveLocationOnFocusEnabled = Boolean(prefs.isRefreshActiveLocationOnFocusEnabled ?? false); // eslint-disable-line prettier/prettier
         if (this.isRememberSearchEnabled) {
           // If remember search criteria, restore the search criteria list...
           const serializedCriterias: SearchGroupDTO | (SearchGroupDTO | SearchCriteria)[] =
@@ -1799,6 +1819,8 @@ class UiStore {
       overviewInspectorWidth: this.overviewInspectorWidth,
       isRefreshLocationsStartupEnabled: this.isRefreshLocationsStartupEnabled,
       isRememberSearchEnabled: this.isRememberSearchEnabled,
+      isNotifyOnNewFilesEnabled: this.isNotifyOnNewFilesEnabled,
+      isRefreshActiveLocationOnFocusEnabled: this.isRefreshActiveLocationOnFocusEnabled,
       isSlideMode: this.isSlideMode,
       firstItem: this.firstItem,
       searchRootGroup: this.searchRootGroup.serialize(this.rootStore),

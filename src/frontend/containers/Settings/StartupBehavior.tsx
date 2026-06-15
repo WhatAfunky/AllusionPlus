@@ -30,6 +30,18 @@ export const StartupBehavior = observer(() => {
       >
         Refresh Non Auto-Synced Locations and Detect File Changes
       </Toggle>
+      <Toggle
+        checked={uiStore.isNotifyOnNewFilesEnabled}
+        onChange={uiStore.toggleNotifyOnNewFiles}
+      >
+        Notify me about new files instead of refreshing the gallery automatically
+      </Toggle>
+      <Toggle
+        checked={uiStore.isRefreshActiveLocationOnFocusEnabled}
+        onChange={uiStore.toggleRefreshActiveLocationOnFocus}
+      >
+        Check the current location for new files when the window regains focus
+      </Toggle>
       <br />
       <Toggle checked={isAutoUpdateEnabled} onChange={toggleAutoUpdate}>
         Check for updates

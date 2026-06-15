@@ -2,6 +2,7 @@ import React, { useCallback, useEffect } from 'react';
 import { observer } from 'mobx-react-lite';
 
 import { useStore } from './contexts/StoreContext';
+import { RendererMessenger } from 'src/ipc/renderer';
 
 import ErrorBoundary from './containers/ErrorBoundary';
 import HelpCenter from './containers/HelpCenter';
@@ -22,7 +23,7 @@ import { reaction } from 'mobx';
 const PLATFORM = process.platform;
 
 const App = observer(() => {
-  const { uiStore } = useStore();
+  const { uiStore, locationStore } = useStore();
 
   // Listen to responses of Web Workers
   useWorkerListener();
@@ -36,6 +37,16 @@ const App = observer(() => {
 
     return () => window.removeEventListener('keydown', uiStore.processGlobalShortCuts);
   }, [uiStore.processGlobalShortCuts]);
+
+  // Optionally rescan the active location for new files when the window regains focus.
+  useEffect(() => {
+    const removeFocusHandler = RendererMessenger.onFocus(() =>
+      locationStore.refreshActiveLocationOnFocus(),
+    );
+    return () => {
+      removeFocusHandler();
+    };
+  }, [locationStore]);
 
   // Automatically expand outliner when detecting a drag event
   const openOutlinerOnDragEnter = useCallback(() => {
