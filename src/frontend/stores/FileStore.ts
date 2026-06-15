@@ -844,7 +844,7 @@ class FileStore {
     }
   }
 
-  @action async deleteFilesByExtension(ext: IMG_EXTENSIONS_TYPE): Promise<void> {
+  @action async deleteFilesByExtension(ext: string): Promise<void> {
     try {
       const crit = new ClientStringSearchCriteria(undefined, 'extension', ext, 'equals');
       const files = await this.backend.searchFiles(

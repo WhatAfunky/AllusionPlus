@@ -6,7 +6,7 @@ import { getThumbnailPath } from 'common/fs';
 import { batchReducer, promiseAllLimit } from 'common/promise';
 import { DataStorage, makeFileBatchFetcher } from '../../api/data-storage';
 import { OrderDirection } from '../../api/data-storage-search';
-import { FileStats, FileDTO, IMG_EXTENSIONS, IMG_EXTENSIONS_TYPE } from '../../api/file';
+import { FileStats, FileDTO, ManagedExtension } from '../../api/file';
 import { ID, generateId } from '../../api/id';
 import { LocationDTO } from '../../api/location';
 import { RendererMessenger } from '../../ipc/renderer';
@@ -24,7 +24,14 @@ import { execSync } from 'child_process';
 import { debounce } from 'common/timeout';
 
 const PREFERENCES_STORAGE_KEY = 'location-store-preferences';
-type Preferences = { extensions: IMG_EXTENSIONS_TYPE[] };
+type Preferences = { managedExtensions: ManagedExtension[] };
+
+/**
+ * Default managed extensions. In the everything-in model all file types are
+ * indexed by default; the only seeded entry blocks EXR, which is experimental
+ * and can slow the app down. Users can unblock it or add their own entries.
+ */
+const DEFAULT_MANAGED_EXTENSIONS: ManagedExtension[] = [{ extension: 'exr', blocked: true }];
 
 /**
  * Compares metadata of two files to determine whether the files are (likely to be) identical
@@ -57,9 +64,10 @@ class LocationStore {
 
   readonly locationList = observable<ClientLocation>([]);
 
-  // Allow users to disable certain file types. Global option for now, needs restart
-  // TODO: Maybe per location/sub-location?
-  readonly enabledFileExtensions = observable(new Set<IMG_EXTENSIONS_TYPE>());
+  // User-managed list of file extensions. Everything is indexed by default;
+  // entries marked `blocked` are skipped during scan and live watching.
+  // Global option for now, needs restart. TODO: Maybe per location/sub-location?
+  readonly managedExtensions = observable.array<ManagedExtension>([]);
   private filesToUpdate: Map<string, FileStats> = new Map();
   debouncedUpdateFilesToUpdate: () => Promise<void>;
 
@@ -76,12 +84,11 @@ class LocationStore {
     // Restore preferences
     try {
       const prefs = JSON.parse(localStorage.getItem(PREFERENCES_STORAGE_KEY) || '') as Preferences;
-      (prefs.extensions || IMG_EXTENSIONS).forEach((ext) => this.enabledFileExtensions.add(ext));
+      const managed = prefs.managedExtensions ?? DEFAULT_MANAGED_EXTENSIONS;
+      runInAction(() => this.managedExtensions.replace(managed));
     } catch (e) {
       // If no preferences found, use defaults
-      IMG_EXTENSIONS.forEach((ext) => this.enabledFileExtensions.add(ext));
-      // By default, disable EXR for now (experimental)
-      this.enabledFileExtensions.delete('exr');
+      runInAction(() => this.managedExtensions.replace(DEFAULT_MANAGED_EXTENSIONS.slice()));
     }
     this.watcherSnapshotDirectory = await RendererMessenger.getWatcherSnapshotsDirectory();
 
@@ -115,7 +122,7 @@ class LocationStore {
             dir.dateAdded,
             dir.subLocations,
             dir.tags,
-            runInAction(() => Array.from(this.enabledFileExtensions)),
+            runInAction(() => this.blockedExtensions),
             dir.index ?? i,
             dir.isWatchingFiles,
           ),
@@ -507,7 +514,7 @@ class LocationStore {
       location.dateAdded,
       location.subLocations.map((sl) => sl.serialize()),
       Array.from(location.tags, (t) => t.id),
-      runInAction(() => Array.from(this.enabledFileExtensions)),
+      runInAction(() => this.blockedExtensions),
       this.locationList.length,
       location.isWatchingFiles,
     );
@@ -533,7 +540,7 @@ class LocationStore {
       new Date(),
       [],
       [],
-      runInAction(() => Array.from(this.enabledFileExtensions)),
+      runInAction(() => this.blockedExtensions),
       this.locationList.length,
       true,
     );
@@ -621,16 +628,46 @@ class LocationStore {
     this.rootStore.fileStore.refetchFileCounts();
   }
 
-  @action.bound setSupportedImageExtensions(extensions: Set<IMG_EXTENSIONS_TYPE>): void {
-    this.enabledFileExtensions.replace(extensions);
+  /** Extensions the user has explicitly blocked from indexing. */
+  get blockedExtensions(): string[] {
+    return this.managedExtensions.filter((m) => m.blocked).map((m) => m.extension);
+  }
+
+  /** Adds a new managed extension (indexed by default). No-op for blanks/duplicates. */
+  @action.bound addManagedExtension(extension: string): void {
+    const normalized = extension.trim().toLowerCase().replace(/^\.+/, '');
+    if (normalized === '' || this.managedExtensions.some((m) => m.extension === normalized)) {
+      return;
+    }
+    this.managedExtensions.push({ extension: normalized, blocked: false });
+  }
+
+  /** Toggles whether a managed extension is blocked from indexing. */
+  @action.bound toggleManagedExtension(extension: string): void {
+    const entry = this.managedExtensions.find((m) => m.extension === extension);
+    if (entry) {
+      entry.blocked = !entry.blocked;
+    }
+  }
+
+  /** Removes a managed extension entry, reverting it to the default (indexed). */
+  @action.bound removeManagedExtension(extension: string): void {
+    const idx = this.managedExtensions.findIndex((m) => m.extension === extension);
+    if (idx !== -1) {
+      this.managedExtensions.splice(idx, 1);
+    }
+  }
+
+  /** Persists the managed extensions and pushes the blocked set to every location. */
+  @action.bound saveManagedExtensions(): void {
     localStorage.setItem(
       PREFERENCES_STORAGE_KEY,
-      JSON.stringify(
-        { extensions: Array.from(this.enabledFileExtensions) } as Preferences,
-        null,
-        2,
-      ),
+      JSON.stringify({ managedExtensions: this.managedExtensions.slice() } as Preferences, null, 2),
     );
+    const blocked = this.blockedExtensions;
+    for (const location of this.locationList) {
+      location.updateBlockedExtensions(blocked);
+    }
   }
 
   @action async addFile(fileStats: FileStats, location: ClientLocation): Promise<void> {
