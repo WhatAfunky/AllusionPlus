@@ -78,6 +78,8 @@ const ContentLabels: Record<Content, string> = {
   [Content.Query]: 'Query',
 };
 
+const CUSTOM_THUMBNAILS_STORAGE_KEY = 'custom-thumbnail-ids';
+
 class FileStore {
   static MIN_PAGINATION_SIZE = 250;
 
@@ -132,6 +134,9 @@ class FileStore {
   debouncedRefetch: () => void;
   debouncedSaveFilesToSave: () => Promise<void>;
 
+  /** IDs of files the user has assigned a custom (e.g. clipboard) thumbnail to. */
+  readonly customThumbnailIds = observable.set<ID>();
+
   constructor(backend: DataStorage, rootStore: RootStore) {
     this.backend = backend;
     this.rootStore = rootStore;
@@ -140,6 +145,29 @@ class FileStore {
     this.debouncedRefetch = debounce(this.refetch, 1600).bind(this);
     this.debouncedSaveFilesToSave = debounce(this.saveFilesToSave, 200).bind(this);
     // reaction to keep updated properties "related" to fileList
+
+    try {
+      const stored = JSON.parse(localStorage.getItem(CUSTOM_THUMBNAILS_STORAGE_KEY) || '[]');
+      if (Array.isArray(stored)) {
+        runInAction(() => this.customThumbnailIds.replace(stored));
+      }
+    } catch {
+      // ignore malformed/missing preference
+    }
+  }
+
+  /** Whether the given file has a user-assigned custom thumbnail. */
+  hasCustomThumbnail(id: ID): boolean {
+    return this.customThumbnailIds.has(id);
+  }
+
+  /** Records a file as having a custom thumbnail and persists the set. */
+  @action.bound markCustomThumbnail(id: ID): void {
+    this.customThumbnailIds.add(id);
+    localStorage.setItem(
+      CUSTOM_THUMBNAILS_STORAGE_KEY,
+      JSON.stringify(Array.from(this.customThumbnailIds)),
+    );
   }
 
   @action.bound async readTagsFromSelectedFiles(): Promise<void> {

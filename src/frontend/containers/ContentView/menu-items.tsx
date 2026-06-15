@@ -91,6 +91,11 @@ export const FileViewerMenuItems = ({ file }: { file: ClientFile }) => {
         disabled={isFileExtensionVideo(file.extension)}
       />
       <MenuItem
+        onClick={() => uiStore.setClipboardAsThumbnail(file)}
+        text="Set Clipboard Image as Thumbnail"
+        icon={IconSet.MEDIA}
+      />
+      <MenuItem
         onClick={handlePreviewWindow}
         text="Open In Preview Window"
         icon={IconSet.PREVIEW}
@@ -270,6 +275,11 @@ export const SlideFileViewerMenuItems = observer(({ file }: { file: ClientFile }
         text="Copy Image to Clipboard"
         icon={IconSet.COPY}
         disabled={isFileExtensionVideo(file.extension)}
+      />
+      <MenuItem
+        onClick={() => uiStore.setClipboardAsThumbnail(file)}
+        text="Set Clipboard Image as Thumbnail"
+        icon={IconSet.MEDIA}
       />
       <MenuItem onClick={handleCopyTagsToClipboard} text="Copy Tags" icon={IconSet.TAG_GROUP} />
       <MenuItem

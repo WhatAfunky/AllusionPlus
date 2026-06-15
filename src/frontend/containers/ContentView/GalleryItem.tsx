@@ -10,6 +10,7 @@ import { useStore } from '../../contexts/StoreContext';
 import { ClientFile } from '../../entities/File';
 import { usePromise } from '../../hooks/usePromise';
 import { CommandDispatcher } from './Commands';
+import { getPlaceholderStyle } from '../../image/placeholderStyle';
 import { ITransform } from './Masonry/layout-helpers';
 import { GalleryVideoPlaybackMode } from 'src/frontend/stores/UiStore';
 import { thumbnailMaxSize } from 'common/config';
@@ -87,6 +88,19 @@ export const MasonryCell = observer(
             hovered={isHovered}
             galleryVideoPlaybackMode={uiStore.galleryVideoPlaybackMode}
           />
+          {file.hasCustomThumbnail && (
+            <div
+              className="placeholder-frame"
+              style={{ borderColor: getPlaceholderStyle(file.extension).accent }}
+            >
+              <span
+                className="placeholder-frame-badge"
+                style={{ backgroundColor: getPlaceholderStyle(file.extension).accent }}
+              >
+                .{file.extension.toUpperCase()}
+              </span>
+            </div>
+          )}
         </div>
         {file.isBroken === true && !fileStore.showsMissingContent && (
           <IconButton

@@ -13,6 +13,7 @@ import { generateThumbnailUsingWorker } from './ThumbnailGeneration';
 import TifLoader from './TifLoader';
 import { generateThumbnail, getBlob } from './util';
 import { isFileExtensionVideo } from 'common/fs';
+import { getPlaceholderStyle } from './placeholderStyle';
 
 type FormatHandlerType =
   | 'web'
@@ -68,23 +69,8 @@ function getHandler(extension: string): FormatHandlerType {
  */
 const PLACEHOLDER_DIMENSIONS = { width: 512, height: 512 };
 
-/**
- * Visual style per file category, used when generating placeholder thumbnails.
- * bg: canvas background, accent: border + label color.
- * Falls back to DEFAULT_PLACEHOLDER_STYLE for any unlisted extension.
- */
-const PLACEHOLDER_STYLE: Record<string, { bg: string; accent: string; label: string }> = {
-  mp3:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
-  wav:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
-  flac:  { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
-  aac:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
-  m4a:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
-  opus:  { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
-  wma:   { bg: '#1a1028', accent: '#8b5cf6', label: 'AUDIO' },
-  blend: { bg: '#1a1100', accent: '#e87d0d', label: 'BLEND' },
-};
-
-const DEFAULT_PLACEHOLDER_STYLE = { bg: '#1a1a1a', accent: '#555555', label: 'FILE' };
+// Placeholder visual styles live in a shared module so the gallery frame
+// (GalleryItem) can use the same per-category colors. See ./placeholderStyle.
 
 type ObjectURL = string;
 
@@ -119,6 +105,11 @@ class ImageLoader {
   }
 
   async ensureThumbnail(file: ClientFile): Promise<boolean> {
+    // Never regenerate over a user-assigned custom thumbnail.
+    if (file.hasCustomThumbnail) {
+      return false;
+    }
+
     const { extension, absolutePath, thumbnailPath } = {
       extension: file.extension,
       absolutePath: file.absolutePath,
@@ -268,7 +259,7 @@ class ImageLoader {
       throw new Error('Could not get 2D canvas context for placeholder thumbnail');
     }
 
-    const style = PLACEHOLDER_STYLE[extension] ?? DEFAULT_PLACEHOLDER_STYLE;
+    const style = getPlaceholderStyle(extension);
 
     // Background
     ctx.fillStyle = style.bg;

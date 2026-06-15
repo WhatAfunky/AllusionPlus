@@ -40,6 +40,7 @@
 }
 
 .thumbnail {
+  position: relative;
   display: flex;
   grid-area: image;
   width: var(--thumbnail-size);
@@ -92,6 +93,30 @@
   :not([aria-selected=true]) > & > :is(img, video, .image-error){
     transition: all 0ms;
   }
+}
+
+// Colored frame + filetype badge shown over items with a custom thumbnail,
+// so the unsupported-file-type look (border + filetype) is preserved.
+.placeholder-frame {
+  position: absolute;
+  inset: 0;
+  border: 0.2rem solid; // color set inline per file category
+  border-radius: var(--thumbnail-radius);
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.placeholder-frame-badge {
+  position: absolute;
+  bottom: 0.3rem;
+  left: 0.3rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #fff;
+  border-radius: 0.2rem; // background set inline per file category
 }
 
 [aria-selected='true'] > .thumbnail {

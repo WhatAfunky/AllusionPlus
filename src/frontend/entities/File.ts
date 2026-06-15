@@ -176,6 +176,11 @@ export class ClientFile {
     this.thumbnailPath = `${thumbnailPath.split('?')[0]}?v=${Date.now()}`;
   }
 
+  /** Whether the user has assigned a custom thumbnail (e.g. from the clipboard) to this file. */
+  get hasCustomThumbnail(): boolean {
+    return this.store.hasCustomThumbnail(this.id);
+  }
+
   @action.bound addTag(tag: ClientTag): void {
     const hasTag = this.tags.has(tag);
     if (!hasTag) {

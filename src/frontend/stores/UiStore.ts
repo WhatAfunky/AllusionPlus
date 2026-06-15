@@ -4,7 +4,7 @@ import { action, computed, makeObservable, observable, reaction } from 'mobx';
 
 import { maxNumberOfExternalFilesBeforeWarning } from 'common/config';
 import { clamp } from 'common/core';
-import { encodeFilePath, isNativeImageCompatible } from 'common/fs';
+import { encodeFilePath, getThumbnailPath, isNativeImageCompatible } from 'common/fs';
 import { generateId, ID } from '../../api/id';
 import { SearchCriteria } from '../../api/search-criteria';
 import { RendererMessenger } from '../../ipc/renderer';
@@ -691,6 +691,40 @@ class UiStore {
         copyToastKey,
       );
       console.error('Could not copy image to clipboard', e);
+    }
+  }
+
+  /** Uses the image currently in the clipboard as a custom thumbnail for the given file. */
+  @action.bound async setClipboardAsThumbnail(file: ClientFile): Promise<void> {
+    const toastKey = 'custom-thumbnail';
+    try {
+      let image = clipboard.readImage();
+      if (image.isEmpty()) {
+        AppToaster.show(
+          { type: 'warning', message: 'No image found in the clipboard.', timeout: 4000 },
+          toastKey,
+        );
+        return;
+      }
+      // Downscale large clipboard images so thumbnails stay light.
+      if (image.getSize().width > 400) {
+        image = image.resize({ width: 400 });
+      }
+      const thumbnailPath = getThumbnailPath(file.absolutePath, this.thumbnailDirectory);
+      await fse.outputFile(thumbnailPath, image.toPNG());
+      this.rootStore.fileStore.markCustomThumbnail(file.id);
+      // Cache-busts the <img> so the new thumbnail shows immediately.
+      file.setThumbnailPath(thumbnailPath);
+      AppToaster.show(
+        { type: 'success', message: 'Thumbnail set from clipboard image.', timeout: 2000 },
+        toastKey,
+      );
+    } catch (e) {
+      console.error('Could not set clipboard image as thumbnail', e);
+      AppToaster.show(
+        { type: 'error', message: 'Could not set thumbnail from clipboard.', timeout: 4000 },
+        toastKey,
+      );
     }
   }
 
