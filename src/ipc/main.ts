@@ -46,6 +46,7 @@ import {
   TOGGLE_CHECK_UPDATES_ON_STARTUP,
   TOGGLE_DEV_TOOLS,
   TRASH_FILE,
+  GET_QUICKLOOK_THUMBNAIL,
   WindowSystemButtonPress,
   WINDOW_BLUR,
   WINDOW_FOCUS,
@@ -98,6 +99,10 @@ export class MainMessenger {
         return e;
       }
     });
+
+  static onGetQuickLookThumbnail = (
+    cb: (absolutePath: string, size: number) => Promise<Uint8Array | undefined>,
+  ) => ipcMain.handle(GET_QUICKLOOK_THUMBNAIL, (_, absolutePath, size) => cb(absolutePath, size));
 
   static onSetFullScreen = (cb: (isFullScreen: boolean) => void) =>
     ipcMain.handle(SET_FULL_SCREEN, (_, isFullScreen) => cb(isFullScreen));

@@ -119,6 +119,12 @@
   border-radius: 0.2rem; // background set inline per file category
 }
 
+// When a framed item is selected, recolor the frame border to the selection
+// color (overriding the inline per-category color) so the selection is obvious.
+[aria-selected='true'] .placeholder-frame {
+  border-color: var(--accent-color) !important;
+}
+
 [aria-selected='true'] > .thumbnail {
   // If selected, show a blue border
   background-color: var(--accent-color);

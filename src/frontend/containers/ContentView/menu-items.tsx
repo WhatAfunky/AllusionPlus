@@ -90,11 +90,18 @@ export const FileViewerMenuItems = ({ file }: { file: ClientFile }) => {
         icon={IconSet.COPY}
         disabled={isFileExtensionVideo(file.extension)}
       />
-      <MenuItem
-        onClick={() => uiStore.setClipboardAsThumbnail(file)}
-        text="Set Clipboard Image as Thumbnail"
-        icon={IconSet.MEDIA}
-      />
+      <MenuSubItem text="Thumbnail" icon={IconSet.MEDIA}>
+        <MenuItem
+          onClick={() => uiStore.setThumbnailFromQuickLook(file)}
+          text="Set from QuickLook Preview"
+          icon={IconSet.PREVIEW}
+        />
+        <MenuItem
+          onClick={() => uiStore.setClipboardAsThumbnail(file)}
+          text="Set from Clipboard Image"
+          icon={IconSet.MEDIA}
+        />
+      </MenuSubItem>
       <MenuItem
         onClick={handlePreviewWindow}
         text="Open In Preview Window"
@@ -276,11 +283,18 @@ export const SlideFileViewerMenuItems = observer(({ file }: { file: ClientFile }
         icon={IconSet.COPY}
         disabled={isFileExtensionVideo(file.extension)}
       />
-      <MenuItem
-        onClick={() => uiStore.setClipboardAsThumbnail(file)}
-        text="Set Clipboard Image as Thumbnail"
-        icon={IconSet.MEDIA}
-      />
+      <MenuSubItem text="Thumbnail" icon={IconSet.MEDIA}>
+        <MenuItem
+          onClick={() => uiStore.setThumbnailFromQuickLook(file)}
+          text="Set from QuickLook Preview"
+          icon={IconSet.PREVIEW}
+        />
+        <MenuItem
+          onClick={() => uiStore.setClipboardAsThumbnail(file)}
+          text="Set from Clipboard Image"
+          icon={IconSet.MEDIA}
+        />
+      </MenuSubItem>
       <MenuItem onClick={handleCopyTagsToClipboard} text="Copy Tags" icon={IconSet.TAG_GROUP} />
       <MenuItem
         onClick={handlePasteTags}

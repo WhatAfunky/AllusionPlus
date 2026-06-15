@@ -47,6 +47,7 @@ import {
   TOGGLE_CHECK_UPDATES_ON_STARTUP,
   TOGGLE_DEV_TOOLS,
   TRASH_FILE,
+  GET_QUICKLOOK_THUMBNAIL,
   WindowSystemButtonPress,
   WINDOW_BLUR,
   WINDOW_FOCUS,
@@ -83,6 +84,13 @@ export class RendererMessenger {
 
   static trashFile = (absolutePath: string): Promise<Error | undefined> =>
     ipcRenderer.invoke(TRASH_FILE, absolutePath);
+
+  /** Returns a PNG buffer of the OS (QuickLook on macOS) thumbnail, or undefined if unavailable. */
+  static getQuickLookThumbnail = (
+    absolutePath: string,
+    size: number,
+  ): Promise<Uint8Array | undefined> =>
+    ipcRenderer.invoke(GET_QUICKLOOK_THUMBNAIL, absolutePath, size);
 
   static setFullScreen = (isFullScreen: boolean) =>
     ipcRenderer.invoke(SET_FULL_SCREEN, isFullScreen);

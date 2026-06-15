@@ -671,6 +671,24 @@ MainMessenger.onSendPreviewFiles((msg) => {
 // Set native window theme (frame, menu bar)
 MainMessenger.onSetTheme((msg) => (nativeTheme.themeSource = msg.theme));
 
+// Fetch the OS thumbnail (QuickLook on macOS, shell thumbnail on Windows) for a file.
+// Returns a PNG buffer, or undefined when no preview is available (e.g. on Linux).
+MainMessenger.onGetQuickLookThumbnail(async (absolutePath, size) => {
+  try {
+    const image = await nativeImage.createThumbnailFromPath(absolutePath, {
+      width: size,
+      height: size,
+    });
+    if (image.isEmpty()) {
+      return undefined;
+    }
+    return image.toPNG();
+  } catch (e) {
+    console.error('Could not create QuickLook thumbnail', absolutePath, e);
+    return undefined;
+  }
+});
+
 async function tryCreateIcon(
   absolutePath: string,
   method: 'ThumbnailFromPath' | 'FromPath',

@@ -694,6 +694,15 @@ class UiStore {
     }
   }
 
+  /** Writes a PNG buffer as the file's custom thumbnail and refreshes it in the gallery. */
+  private async writeCustomThumbnail(file: ClientFile, png: Uint8Array): Promise<void> {
+    const thumbnailPath = getThumbnailPath(file.absolutePath, this.thumbnailDirectory);
+    await fse.outputFile(thumbnailPath, png);
+    this.rootStore.fileStore.markCustomThumbnail(file.id);
+    // Cache-busts the <img> so the new thumbnail shows immediately.
+    file.setThumbnailPath(thumbnailPath);
+  }
+
   /** Uses the image currently in the clipboard as a custom thumbnail for the given file. */
   @action.bound async setClipboardAsThumbnail(file: ClientFile): Promise<void> {
     const toastKey = 'custom-thumbnail';
@@ -710,11 +719,7 @@ class UiStore {
       if (image.getSize().width > 400) {
         image = image.resize({ width: 400 });
       }
-      const thumbnailPath = getThumbnailPath(file.absolutePath, this.thumbnailDirectory);
-      await fse.outputFile(thumbnailPath, image.toPNG());
-      this.rootStore.fileStore.markCustomThumbnail(file.id);
-      // Cache-busts the <img> so the new thumbnail shows immediately.
-      file.setThumbnailPath(thumbnailPath);
+      await this.writeCustomThumbnail(file, image.toPNG());
       AppToaster.show(
         { type: 'success', message: 'Thumbnail set from clipboard image.', timeout: 2000 },
         toastKey,
@@ -723,6 +728,36 @@ class UiStore {
       console.error('Could not set clipboard image as thumbnail', e);
       AppToaster.show(
         { type: 'error', message: 'Could not set thumbnail from clipboard.', timeout: 4000 },
+        toastKey,
+      );
+    }
+  }
+
+  /**
+   * Uses the OS preview thumbnail (QuickLook on macOS) as a custom thumbnail.
+   * Falls back to a warning toast when the platform/file has no preview available.
+   */
+  @action.bound async setThumbnailFromQuickLook(file: ClientFile): Promise<void> {
+    const toastKey = 'custom-thumbnail';
+    try {
+      AppToaster.show({ message: 'Generating preview thumbnail...', timeout: 10000 }, toastKey);
+      const png = await RendererMessenger.getQuickLookThumbnail(file.absolutePath, 400);
+      if (png === undefined) {
+        AppToaster.show(
+          { type: 'warning', message: 'No preview is available for this file.', timeout: 4000 },
+          toastKey,
+        );
+        return;
+      }
+      await this.writeCustomThumbnail(file, png);
+      AppToaster.show(
+        { type: 'success', message: 'Thumbnail set from preview.', timeout: 2000 },
+        toastKey,
+      );
+    } catch (e) {
+      console.error('Could not set thumbnail from QuickLook preview', e);
+      AppToaster.show(
+        { type: 'error', message: 'Could not generate a preview thumbnail.', timeout: 4000 },
         toastKey,
       );
     }
