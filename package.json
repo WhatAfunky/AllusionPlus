@@ -86,7 +86,11 @@
       "build/**/*",
       "package.json"
     ],
-    "asar": true
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "node_modules/better-sqlite3/**"
+    ]
   },
   "repository": {
     "type": "git",
