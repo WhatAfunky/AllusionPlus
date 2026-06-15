@@ -6,6 +6,7 @@ import { useStore } from '../../contexts/StoreContext';
 import { Advanced } from './Advanced';
 import { Appearance } from './Appearance';
 import { BackgroundProcesses } from './BackgroundProcesses';
+import { ExcludedItems } from './ExcludedItems';
 import { ImageFormatPicker } from './ImageFormatPicker';
 import { ImportExport } from './ImportExport';
 import { Shortcuts } from './Shortcuts';
@@ -61,6 +62,10 @@ const Tabs = () => {
     {
       label: 'File Formats',
       content: ImageFormatPicker,
+    },
+    {
+      label: 'Excluded Items',
+      content: ExcludedItems,
     },
     {
       label: 'Import/Export',

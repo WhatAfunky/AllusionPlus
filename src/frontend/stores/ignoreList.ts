@@ -91,6 +91,38 @@ export async function appendToIgnoreList(
 }
 
 /**
+ * Removes a single entry from the .allusionignore file in the Location root.
+ * - `absolutePath` is the absolute path as stored in a location's ignoredPaths.
+ * - Matching is done on the relative path, ignoring a trailing slash so both the
+ *   file form (`foo/bar.png`) and the directory form (`foo/`) are removed.
+ * - Comment and blank lines are preserved.
+ */
+export async function removeFromIgnoreList(
+  locationPath: string,
+  absolutePath: string,
+): Promise<void> {
+  const ignoreFilePath = SysPath.join(locationPath, IGNORE_FILE_NAME);
+  if (!(await fse.pathExists(ignoreFilePath))) {
+    return;
+  }
+
+  const target = SysPath.relative(locationPath, absolutePath).replace(/\\/g, '/').replace(/\/+$/, '');
+
+  const content = await fse.readFile(ignoreFilePath, 'utf-8');
+  const kept = content.split('\n').filter((line) => {
+    const trimmed = line.trim();
+    // Keep comments and blank lines untouched
+    if (trimmed === '' || trimmed.startsWith('#')) {
+      return true;
+    }
+    return trimmed.replace(/\/+$/, '') !== target;
+  });
+
+  await fse.outputFile(ignoreFilePath, kept.join('\n'), 'utf-8');
+  console.debug('Removed from .allusionignore:', target);
+}
+
+/**
  * Checks whether an absolute path should be excluded based on the ignore list.
  * Supports both exact file matches and prefix matching for directories.
  */
