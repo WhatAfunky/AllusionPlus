@@ -1086,31 +1086,56 @@ class FileStore {
   }
 
   /**
-   * Orders files by their exact tag-set: groups are ordered by tag count ascending
-   * (single-tag groups before multi-tag combinations), then alphabetically by the
-   * sorted tag names, with date added as a stable tie-breaker within a group.
+   * Orders files so items sharing tags sit together. Each file's tags are ordered
+   * by how common they are across the result set (most common first), then files
+   * are compared element-by-element on that list. This clusters items that share
+   * their common tags, and places a superset right next to its subset (e.g.
+   * "Reference, Kris" immediately followed by "Reference, Kris, 3D"). Untagged
+   * files go last; date added is a stable tie-breaker.
    */
   private sortByTagGroup(files: FileDTO[]): FileDTO[] {
     const { tagStore } = this.rootStore;
-    const groupKey = (f: FileDTO): { count: number; key: string } => {
-      const names = f.tags
-        .map((id) => tagStore.get(id)?.name ?? '')
-        .filter((name) => name.length > 0)
-        .sort((a, b) => a.localeCompare(b));
-      return { count: names.length, key: names.join(' ') };
-    };
+
+    // Count how often each tag appears across the result set.
+    const frequency = new Map<ID, number>();
+    for (const file of files) {
+      for (const id of file.tags) {
+        frequency.set(id, (frequency.get(id) ?? 0) + 1);
+      }
+    }
+
+    // Each file's tag names ordered by descending frequency, then name, so shared
+    // common tags lead and items that share them line up.
+    const orderedNames = (file: FileDTO): string[] =>
+      file.tags
+        .map((id) => ({ name: tagStore.get(id)?.name ?? '', count: frequency.get(id) ?? 0 }))
+        .filter((tag) => tag.name.length > 0)
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+        .map((tag) => tag.name);
+
     return files
-      .map((f) => ({ f, k: groupKey(f) }))
+      .map((file) => ({ file, names: orderedNames(file) }))
       .sort((a, b) => {
-        if (a.k.count !== b.k.count) {
-          return a.k.count - b.k.count;
+        // Untagged files go last.
+        if (a.names.length === 0 || b.names.length === 0) {
+          if (a.names.length !== b.names.length) {
+            return a.names.length === 0 ? 1 : -1;
+          }
         }
-        if (a.k.key !== b.k.key) {
-          return a.k.key.localeCompare(b.k.key);
+        const shared = Math.min(a.names.length, b.names.length);
+        for (let i = 0; i < shared; i++) {
+          const cmp = a.names[i].localeCompare(b.names[i]);
+          if (cmp !== 0) {
+            return cmp;
+          }
         }
-        return a.f.dateAdded.getTime() - b.f.dateAdded.getTime();
+        // Shared prefix: the subset (fewer tags) comes before the superset.
+        if (a.names.length !== b.names.length) {
+          return a.names.length - b.names.length;
+        }
+        return a.file.dateAdded.getTime() - b.file.dateAdded.getTime();
       })
-      .map((x) => x.f);
+      .map((x) => x.file);
   }
 
   @action.bound async fetchAllFiles(): Promise<void> {
