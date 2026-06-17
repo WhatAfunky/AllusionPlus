@@ -60,7 +60,7 @@ const sortMenuData: Array<{
   text: string;
   hideDirection?: boolean;
 }> = [
-  // { prop: 'tags', icon: IconSet.TAG, text: 'Tag' },
+  { prop: 'tagGroup', icon: IconSet.TAG, text: 'Tags (grouped)', hideDirection: true },
   { prop: 'name', icon: IconSet.FILTER_NAME_UP, text: 'Name' },
   { prop: 'absolutePath', icon: IconSet.FOLDER_OPEN, text: 'Path' },
   { prop: 'extension', icon: IconSet.FILTER_FILE_TYPE, text: 'File type' },

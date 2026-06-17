@@ -916,7 +916,9 @@ class FileStore {
   }
 
   @action.bound async fetchPage(direction: PaginationDirection): Promise<void> {
-    if (this.showsMissingContent) {
+    // Tag grouping loads the whole result set up front and sorts client-side,
+    // so there is no incremental pagination in that mode.
+    if (this.showsMissingContent || this.orderBy === 'tagGroup') {
       return;
     }
     const { uiStore } = this.rootStore;
@@ -933,11 +935,13 @@ class FileStore {
       // continue if the current taskId is the same else abort the fetch
       const currentFetchId = runInAction(() => this.fetchTaskIdPair[0]);
       if (start === currentFetchId) {
-        if (fetchedFiles.length === 0) {
+        // Only notify when reaching the end (scrolling down); the "top reached"
+        // notification when scrolling back up was distracting.
+        if (fetchedFiles.length === 0 && direction === 'after') {
           AppToaster.show(
             {
-              message: `${direction === 'after' ? 'End' : 'Top'} of results reached`,
-              timeout: direction === 'after' ? 5000 : 2000,
+              message: 'End of results reached',
+              timeout: 5000,
             },
             'results-edge-reached',
           );
@@ -973,7 +977,7 @@ class FileStore {
 
   @action.bound toCursor(file: ClientFile | FileDTO): Cursor {
     let cursorValue: Cursor['orderValue'];
-    if (this.orderBy === 'random') {
+    if (this.orderBy === 'random' || this.orderBy === 'tagGroup') {
       cursorValue = null;
     } else if (this.orderBy === 'extraProperty') {
       const ep = this.rootStore.extraPropertyStore.get(this.orderByExtraProperty);
@@ -1036,6 +1040,9 @@ class FileStore {
   }
 
   @action.bound async initialFetch(criterias?: ConditionGroupDTO<FileDTO>): Promise<FileDTO[]> {
+    if (this.orderBy === 'tagGroup') {
+      return this.fetchAllSortedByTagGroup(criterias);
+    }
     const args: FetchArgs = this.getFetchArgs();
     // Split the initial pagination into two halves to place the first item in the
     // middle, avoids triggering multiple prepend/append operations on refetch,
@@ -1054,6 +1061,56 @@ class FileStore {
     // Set the first item again to avoid losing the position if the refetch was by deleting files.
     this.rootStore.uiStore.setFirstItem(bottomHalf.at(0) ?? bottomitem);
     return topHalf.concat(bottomHalf);
+  }
+
+  /**
+   * Loads the entire matching result set (no pagination) and orders it client-side
+   * by each file's exact tag-set, so files sharing the same tags are grouped together.
+   */
+  private async fetchAllSortedByTagGroup(
+    criterias?: ConditionGroupDTO<FileDTO>,
+  ): Promise<FileDTO[]> {
+    const all = await this.backend.searchFiles(
+      criterias,
+      'id', // stable DB order; the meaningful ordering is applied below, client-side
+      OrderDirection.Asc,
+      false,
+      undefined, // no limit — grouping needs the whole set
+      'after',
+      undefined,
+      '',
+    );
+    const sorted = this.sortByTagGroup(all);
+    this.rootStore.uiStore.setFirstItem(sorted.at(0));
+    return sorted;
+  }
+
+  /**
+   * Orders files by their exact tag-set: groups are ordered by tag count ascending
+   * (single-tag groups before multi-tag combinations), then alphabetically by the
+   * sorted tag names, with date added as a stable tie-breaker within a group.
+   */
+  private sortByTagGroup(files: FileDTO[]): FileDTO[] {
+    const { tagStore } = this.rootStore;
+    const groupKey = (f: FileDTO): { count: number; key: string } => {
+      const names = f.tags
+        .map((id) => tagStore.get(id)?.name ?? '')
+        .filter((name) => name.length > 0)
+        .sort((a, b) => a.localeCompare(b));
+      return { count: names.length, key: names.join(' ') };
+    };
+    return files
+      .map((f) => ({ f, k: groupKey(f) }))
+      .sort((a, b) => {
+        if (a.k.count !== b.k.count) {
+          return a.k.count - b.k.count;
+        }
+        if (a.k.key !== b.k.key) {
+          return a.k.key.localeCompare(b.k.key);
+        }
+        return a.f.dateAdded.getTime() - b.f.dateAdded.getTime();
+      })
+      .map((x) => x.f);
   }
 
   @action.bound async fetchAllFiles(): Promise<void> {

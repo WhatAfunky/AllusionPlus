@@ -8,7 +8,8 @@ export type StringProperties<T> = {
   [K in keyof T]: T[K] extends string ? K : never;
 }[keyof T];
 
-export type OrderBy<T> = PropertyKeys<T> | 'random' | 'extraProperty';
+// 'tagGroup' is a client-side sort mode: files are grouped by their exact tag-set.
+export type OrderBy<T> = PropertyKeys<T> | 'random' | 'extraProperty' | 'tagGroup';
 
 export const enum OrderDirection {
   Asc,

@@ -102,7 +102,7 @@ export interface IHotkeyMap {
 export const defaultHotkeyMap: IHotkeyMap = {
   toggleOutliner: '1',
   toggleInspector: '2',
-  openFileTagsEditor: '3',
+  openFileTagsEditor: 't',
   toggleEditTagProperties: '4',
   toggleExtraPropertiesEditor: '5',
   toggleLeftFileInfoViewer: '6',

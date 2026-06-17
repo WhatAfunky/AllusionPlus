@@ -1371,7 +1371,11 @@ async function applyPagination<O>(
   let orderColumn: string | RawBuilder<unknown> =
     order === 'extraProperty' ? 'sortValue' : `files.${order}`;
   let type: 'text' | 'number' =
-    order !== 'extraProperty' && order !== 'random' && isFileDTOPropString(order)
+    // 'tagGroup' is a client-side-only sort mode and never reaches the backend.
+    order !== 'extraProperty' &&
+    order !== 'random' &&
+    order !== 'tagGroup' &&
+    isFileDTOPropString(order)
       ? 'text'
       : 'number';
   // Compute pagination consts
