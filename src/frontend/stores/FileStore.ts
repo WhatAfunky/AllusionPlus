@@ -935,17 +935,7 @@ class FileStore {
       // continue if the current taskId is the same else abort the fetch
       const currentFetchId = runInAction(() => this.fetchTaskIdPair[0]);
       if (start === currentFetchId) {
-        // Only notify when reaching the end (scrolling down); the "top reached"
-        // notification when scrolling back up was distracting.
-        if (fetchedFiles.length === 0 && direction === 'after') {
-          AppToaster.show(
-            {
-              message: 'End of results reached',
-              timeout: 5000,
-            },
-            'results-edge-reached',
-          );
-        }
+        // No "top/end of results reached" notifications — they were distracting.
         return this.updateFromBackend(fetchedFiles, direction);
       } else {
         console.debug(`FETCH "${direction}" ABORTED`);
@@ -1113,7 +1103,7 @@ class FileStore {
         .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
         .map((tag) => tag.name);
 
-    return files
+    const sorted = files
       .map((file) => ({ file, names: orderedNames(file) }))
       .sort((a, b) => {
         // Untagged files go last.
@@ -1136,6 +1126,10 @@ class FileStore {
         return a.file.dateAdded.getTime() - b.file.dateAdded.getTime();
       })
       .map((x) => x.file);
+
+    // Descending (the default) leads with the most-common-tag groups; ascending
+    // reverses to lead with the least-common ones.
+    return this.orderDirection === OrderDirection.Asc ? sorted.reverse() : sorted;
   }
 
   @action.bound async fetchAllFiles(): Promise<void> {
