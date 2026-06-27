@@ -14,6 +14,15 @@ import TifLoader from './TifLoader';
 import { generateThumbnail, getBlob } from './util';
 import { isFileExtensionVideo } from 'common/fs';
 import { getPlaceholderStyle } from './placeholderStyle';
+import { RendererMessenger } from '../../ipc/renderer';
+
+// Files whose pixels Chromium cannot decode (e.g. some large/iPhone JPEGs, HEVC
+// video) but the OS can. We remember them so the preview can serve an OS-decoded
+// version. Persisted so it survives restarts (the thumbnail itself is cached).
+const OS_DECODE_STORAGE_KEY = 'os-decode-file-ids';
+
+/** Max edge for the OS-decoded preview image (full view), larger than a thumbnail. */
+const OS_PREVIEW_MAX_SIZE = 2560;
 
 type FormatHandlerType =
   | 'web'
@@ -51,6 +60,7 @@ const FormatHandlers: Partial<Record<string, FormatHandlerType>> = {
   mp4: 'web',
   webm: 'web',
   ogg: 'web',
+  mov: 'web',
   // All other extensions get 'placeholder' via the getHandler() fallback below
 };
 
@@ -82,11 +92,56 @@ class ImageLoader {
   private srcBufferCache: WeakMap<ClientFile, ObjectURL> = new WeakMap();
   private bufferCacheTimer: WeakMap<ClientFile, number> = new WeakMap();
 
+  /** File ids that need the OS image decoder (Chromium can't render them). */
+  private osDecodeIds: Set<string>;
+
   constructor(private exifIO: ExifIO) {
     this.tifLoader = new TifLoader();
     this.exrLoader = new ExrLoader();
     this.psdLoader = new PsdLoader();
     this.ensureThumbnail = action(this.ensureThumbnail.bind(this));
+
+    let stored: string[] = [];
+    try {
+      const raw = JSON.parse(localStorage.getItem(OS_DECODE_STORAGE_KEY) || '[]');
+      if (Array.isArray(raw)) {
+        stored = raw;
+      }
+    } catch {
+      // ignore malformed preference
+    }
+    this.osDecodeIds = new Set(stored);
+  }
+
+  /** Records a file as needing the OS decoder and persists the set. */
+  private markOsDecode(fileId: string): void {
+    if (!this.osDecodeIds.has(fileId)) {
+      this.osDecodeIds.add(fileId);
+      localStorage.setItem(OS_DECODE_STORAGE_KEY, JSON.stringify(Array.from(this.osDecodeIds)));
+    }
+  }
+
+  /**
+   * Generates a thumbnail using the OS (QuickLook on macOS) decoder and writes it
+   * to `thumbnailPath`. Used as a fallback when Chromium can't decode the file.
+   * Returns true on success.
+   */
+  private async generateOsThumbnail(absolutePath: string, thumbnailPath: string): Promise<boolean> {
+    const png = await RendererMessenger.getQuickLookThumbnail(absolutePath, thumbnailMaxSize);
+    if (png === undefined) {
+      return false;
+    }
+    await fse.outputFile(thumbnailPath, png);
+    return true;
+  }
+
+  /** Returns an object URL with an OS-decoded version of the image, for full preview. */
+  private async getOsDecodedBlobUrl(absolutePath: string): Promise<string | undefined> {
+    const png = await RendererMessenger.getQuickLookThumbnail(absolutePath, OS_PREVIEW_MAX_SIZE);
+    if (png === undefined) {
+      return undefined;
+    }
+    return URL.createObjectURL(new Blob([png], { type: 'image/png' }));
   }
 
   async init(): Promise<void> {
@@ -127,8 +182,19 @@ class ImageLoader {
     const handlerType = getHandler(extension);
     switch (handlerType) {
       case 'web':
-        await generateThumbnailUsingWorker(file, thumbnailPath, false);
-        updateThumbnailPath(file, thumbnailPath);
+        try {
+          await generateThumbnailUsingWorker(file, thumbnailPath);
+          updateThumbnailPath(file, thumbnailPath);
+        } catch {
+          // Chromium couldn't decode this file (e.g. some large/iPhone JPEGs, or
+          // HEVC/ProRes video). Fall back to the OS decoder for a poster thumbnail.
+          if (await this.generateOsThumbnail(absolutePath, thumbnailPath)) {
+            this.markOsDecode(file.id);
+            updateThumbnailPath(file, thumbnailPath);
+          } else {
+            throw new Error('Could not generate thumbnail');
+          }
+        }
         break;
       case 'tifLoader':
         await generateThumbnail(this.tifLoader, absolutePath, thumbnailPath, thumbnailMaxSize);
@@ -175,6 +241,20 @@ class ImageLoader {
     const handlerType = getHandler(file.extension);
     switch (handlerType) {
       case 'web':
+        if (this.osDecodeIds.has(file.id)) {
+          // Chromium can't render the original. Videos have no inline playback
+          // here (e.g. HEVC) — show the poster thumbnail; for images, serve an
+          // OS-decoded copy so the full preview works.
+          if (isFileExtensionVideo(file.extension)) {
+            return file.thumbnailPath.split('?')[0];
+          }
+          const cached = this.srcBufferCache.get(file);
+          const src = cached ?? (await this.getOsDecodedBlobUrl(file.absolutePath));
+          if (src !== undefined) {
+            this.updateCache(file, src);
+            return src;
+          }
+        }
         return file.absolutePath;
       case 'tifLoader': {
         const src =

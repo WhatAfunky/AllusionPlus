@@ -2,7 +2,7 @@ import fse from 'fs-extra';
 import { action, computed, makeObservable, observable, runInAction } from 'mobx';
 //import { setTimeout as delay } from 'node:timers/promises';
 
-import { getThumbnailPath } from 'common/fs';
+import { getForgedThumbnailPath, getThumbnailPath } from 'common/fs';
 import { batchReducer, promiseAllLimit } from 'common/promise';
 import { debounce } from 'common/timeout';
 import { DataStorage, makeFileBatchFetcher } from '../../api/data-storage';
@@ -1813,9 +1813,12 @@ class FileStore {
             // Initialize the thumbnail path so the image can be loaded immediately when it mounts.
             // To ensure the thumbnail actually exists, the `ensureThumbnail` function should be called
             runInAction(() => {
+              const thumbnailDirectory = this.rootStore.uiStore.thumbnailDirectory;
               file.setThumbnailPath(
-                this.rootStore.imageLoader.needsThumbnail(f)
-                  ? getThumbnailPath(f.absolutePath, this.rootStore.uiStore.thumbnailDirectory)
+                this.hasCustomThumbnail(f.id)
+                  ? getForgedThumbnailPath(f.id, thumbnailDirectory)
+                  : this.rootStore.imageLoader.needsThumbnail(f)
+                  ? getThumbnailPath(f.absolutePath, thumbnailDirectory)
                   : f.absolutePath,
               );
             });

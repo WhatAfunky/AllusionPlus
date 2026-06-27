@@ -4,7 +4,7 @@ import { action, computed, makeObservable, observable, reaction } from 'mobx';
 
 import { maxNumberOfExternalFilesBeforeWarning } from 'common/config';
 import { clamp } from 'common/core';
-import { encodeFilePath, getThumbnailPath, isNativeImageCompatible } from 'common/fs';
+import { encodeFilePath, getForgedThumbnailPath, isNativeImageCompatible } from 'common/fs';
 import { generateId, ID } from '../../api/id';
 import { SearchCriteria } from '../../api/search-criteria';
 import { RendererMessenger } from '../../ipc/renderer';
@@ -96,6 +96,7 @@ export interface IHotkeyMap {
   // Other
   openPreviewWindow: string;
   openExternal: string;
+  copyFiles: string;
 }
 
 // https://blueprintjs.com/docs/#core/components/hotkeys.dialog
@@ -125,6 +126,7 @@ export const defaultHotkeyMap: IHotkeyMap = {
   refreshLocationsAndDetectFileChanges: 'l',
   openPreviewWindow: 'space',
   openExternal: 'mod + enter',
+  copyFiles: 'mod + c',
 };
 
 /**
@@ -626,6 +628,38 @@ class UiStore {
     }
   }
 
+  /**
+   * Previews the selected files. On macOS this opens the native QuickLook panel;
+   * on other platforms it falls back to the in-app preview window.
+   */
+  @action.bound async quickLookPreview(): Promise<void> {
+    const paths = Array.from(this.fileSelection, (file) => file.absolutePath);
+    if (paths.length === 0) {
+      return;
+    }
+    const usedQuickLook = await RendererMessenger.previewQuickLook(paths);
+    if (!usedQuickLook) {
+      this.openPreviewWindow();
+    }
+  }
+
+  /** Copies the selected files to the OS clipboard as actual files (paste into Finder, etc.). */
+  @action.bound copyFilesToClipboard(): void {
+    const paths = Array.from(this.fileSelection, (file) => file.absolutePath);
+    if (paths.length === 0) {
+      return;
+    }
+    RendererMessenger.copyFilesToClipboard(paths);
+    AppToaster.show(
+      {
+        type: 'success',
+        message: `Copied ${paths.length} file${paths.length > 1 ? 's' : ''} to clipboard.`,
+        timeout: 2000,
+      },
+      'copy-files',
+    );
+  }
+
   @action.bound async copyImageToClipboard(): Promise<void> {
     if (this.fileSelection.size === 0) {
       return;
@@ -696,7 +730,9 @@ class UiStore {
 
   /** Writes a PNG buffer as the file's custom thumbnail and refreshes it in the gallery. */
   private async writeCustomThumbnail(file: ClientFile, png: Uint8Array): Promise<void> {
-    const thumbnailPath = getThumbnailPath(file.absolutePath, this.thumbnailDirectory);
+    // Forged thumbnails live in a separate, stable location keyed by file id so the
+    // auto thumbnail generator and cleanup never overwrite or delete them.
+    const thumbnailPath = getForgedThumbnailPath(file.id, this.thumbnailDirectory);
     await fse.outputFile(thumbnailPath, png);
     this.rootStore.fileStore.markCustomThumbnail(file.id);
     // Cache-busts the <img> so the new thumbnail shows immediately.
@@ -1577,8 +1613,10 @@ class UiStore {
     } else if (matches(hotkeyMap.toggleHelpCenter)) {
       this.toggleHelpCenter();
     } else if (matches(hotkeyMap.openPreviewWindow)) {
-      this.openPreviewWindow();
-      e.preventDefault(); // prevent scrolling with space when opening the preview window
+      this.quickLookPreview();
+      e.preventDefault(); // prevent scrolling with space when opening the preview
+    } else if (matches(hotkeyMap.copyFiles)) {
+      this.copyFilesToClipboard();
     } else if (matches(hotkeyMap.openExternal)) {
       this.openExternal();
       // Search

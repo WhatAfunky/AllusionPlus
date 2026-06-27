@@ -79,6 +79,7 @@ export const IMG_EXTENSIONS = [
   'mp4',
   'webm',
   'ogg',
+  'mov',
   // Audio — placeholder thumbnail, no playback
   'mp3',
   'wav',

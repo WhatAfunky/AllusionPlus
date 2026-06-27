@@ -48,6 +48,8 @@ import {
   TOGGLE_DEV_TOOLS,
   TRASH_FILE,
   GET_QUICKLOOK_THUMBNAIL,
+  COPY_FILES_TO_CLIPBOARD,
+  PREVIEW_QUICK_LOOK,
   WindowSystemButtonPress,
   WINDOW_BLUR,
   WINDOW_FOCUS,
@@ -91,6 +93,17 @@ export class RendererMessenger {
     size: number,
   ): Promise<Uint8Array | undefined> =>
     ipcRenderer.invoke(GET_QUICKLOOK_THUMBNAIL, absolutePath, size);
+
+  /** Copies the given files to the OS clipboard as actual files (paste into Finder, etc.). */
+  static copyFilesToClipboard = (absolutePaths: string[]): Promise<void> =>
+    ipcRenderer.invoke(COPY_FILES_TO_CLIPBOARD, absolutePaths);
+
+  /**
+   * Opens the given files in the macOS QuickLook panel. Resolves to true when it was
+   * used (macOS), false otherwise so the caller can fall back to the in-app preview.
+   */
+  static previewQuickLook = (absolutePaths: string[]): Promise<boolean> =>
+    ipcRenderer.invoke(PREVIEW_QUICK_LOOK, absolutePaths);
 
   static setFullScreen = (isFullScreen: boolean) =>
     ipcRenderer.invoke(SET_FULL_SCREEN, isFullScreen);

@@ -47,6 +47,8 @@ import {
   TOGGLE_DEV_TOOLS,
   TRASH_FILE,
   GET_QUICKLOOK_THUMBNAIL,
+  COPY_FILES_TO_CLIPBOARD,
+  PREVIEW_QUICK_LOOK,
   WindowSystemButtonPress,
   WINDOW_BLUR,
   WINDOW_FOCUS,
@@ -103,6 +105,12 @@ export class MainMessenger {
   static onGetQuickLookThumbnail = (
     cb: (absolutePath: string, size: number) => Promise<Uint8Array | undefined>,
   ) => ipcMain.handle(GET_QUICKLOOK_THUMBNAIL, (_, absolutePath, size) => cb(absolutePath, size));
+
+  static onCopyFilesToClipboard = (cb: (absolutePaths: string[]) => void) =>
+    ipcMain.handle(COPY_FILES_TO_CLIPBOARD, (_, absolutePaths) => cb(absolutePaths));
+
+  static onPreviewQuickLook = (cb: (absolutePaths: string[]) => boolean) =>
+    ipcMain.handle(PREVIEW_QUICK_LOOK, (_, absolutePaths) => cb(absolutePaths));
 
   static onSetFullScreen = (cb: (isFullScreen: boolean) => void) =>
     ipcMain.handle(SET_FULL_SCREEN, (_, isFullScreen) => cb(isFullScreen));

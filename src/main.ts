@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   BrowserWindowConstructorOptions,
+  clipboard,
   dialog,
   Menu,
   nativeImage,
@@ -12,6 +13,7 @@ import {
   Rectangle,
   Tray,
 } from 'electron';
+import { spawn } from 'child_process';
 import path from 'path';
 import fse from 'fs-extra';
 import { autoUpdater, UpdateInfo } from 'electron-updater';
@@ -686,6 +688,81 @@ MainMessenger.onGetQuickLookThumbnail(async (absolutePath, size) => {
   } catch (e) {
     console.error('Could not create QuickLook thumbnail', absolutePath, e);
     return undefined;
+  }
+});
+
+// Copy actual files to the OS clipboard (so they can be pasted into Finder, etc.).
+// macOS uses the NSFilenamesPboardType plist; other platforms fall back to text paths.
+MainMessenger.onCopyFilesToClipboard((absolutePaths) => {
+  if (absolutePaths.length === 0) {
+    return;
+  }
+  try {
+    if (process.platform === 'darwin') {
+      const escapeXml = (s: string) =>
+        s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const items = absolutePaths.map((p) => `<string>${escapeXml(p)}</string>`).join('');
+      const plist =
+        '<?xml version="1.0" encoding="UTF-8"?>' +
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' +
+        `<plist version="1.0"><array>${items}</array></plist>`;
+      clipboard.writeBuffer('NSFilenamesPboardType', Buffer.from(plist, 'utf8'));
+    } else {
+      clipboard.writeText(absolutePaths.join('\n'));
+    }
+  } catch (e) {
+    console.error('Could not copy files to clipboard', e);
+  }
+});
+
+// Audio/video files crash `qlmanage -p` on modern macOS (AVKit throws
+// "Setting highlightedTimeRanges is not supported in your app."), so those are
+// opened in the default app instead. Everything else uses QuickLook.
+const QL_UNSUPPORTED_AV = new Set([
+  'mp4',
+  'mov',
+  'webm',
+  'ogg',
+  'mkv',
+  'm4v',
+  'avi',
+  'mp3',
+  'wav',
+  'flac',
+  'aac',
+  'm4a',
+  'opus',
+  'wma',
+]);
+
+// Open files in the macOS QuickLook panel. Returns false on other platforms so the
+// renderer can fall back to its in-app preview window.
+MainMessenger.onPreviewQuickLook((absolutePaths) => {
+  if (process.platform !== 'darwin' || absolutePaths.length === 0) {
+    return false;
+  }
+  try {
+    const quickLookPaths: string[] = [];
+    for (const filePath of absolutePaths) {
+      const ext = path.extname(filePath).slice(1).toLowerCase();
+      if (QL_UNSUPPORTED_AV.has(ext)) {
+        // QuickLook crashes on AV files here — open in the default player instead.
+        shell.openPath(filePath);
+      } else {
+        quickLookPaths.push(filePath);
+      }
+    }
+    if (quickLookPaths.length > 0) {
+      const proc = spawn('qlmanage', ['-p', ...quickLookPaths], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      proc.unref();
+    }
+    return true;
+  } catch (e) {
+    console.error('Could not open QuickLook preview', e);
+    return false;
   }
 });
 

@@ -15,6 +15,16 @@ export function getThumbnailPath(filePath: string, thumbnailDirectory: string): 
   return path.join(thumbnailDirectory, `${baseFilename}-${hash}.${thumbnailFormat}`);
 }
 
+/**
+ * Path for a user-assigned ("forged") thumbnail. These live in a separate
+ * `forged` subfolder keyed by the stable file id, so the auto thumbnail
+ * generator and cleanup never overwrite or delete them, and they survive
+ * the file being moved or renamed.
+ */
+export function getForgedThumbnailPath(fileId: string, thumbnailDirectory: string): string {
+  return path.join(thumbnailDirectory, 'forged', `${fileId}.png`);
+}
+
 /** Use this for any <img src attribute! */
 export function encodeFilePath(filePath: string): string {
   if (filePath.startsWith('data:image') || filePath.startsWith('blob:')) {
@@ -47,7 +57,12 @@ export async function isDirEmpty(dir: string) {
 // Video extensions
 // ---------------------------------------------------------------------------
 
-const VideoExtensions = ['webm', 'mp4', 'ogg'] as const satisfies readonly IMG_EXTENSIONS_TYPE[];
+const VideoExtensions = [
+  'webm',
+  'mp4',
+  'ogg',
+  'mov',
+] as const satisfies readonly IMG_EXTENSIONS_TYPE[];
 export type VideoExtensionsType = (typeof VideoExtensions)[number];
 
 /**
